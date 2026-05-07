@@ -1,0 +1,311 @@
+#!/bin/bash
+
+# 自动修复 Windows 换行符问题
+sed -i 's/\r$//' "$0" 2>/dev/null
+
+# 定义颜色
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+# 作者与脚本信息
+AUTHOR_GITHUB="https://github.com/Taylor000"
+SCRIPT_NAME="一个人的脚本百宝箱"
+SHORTCUT_CMD="tool"
+
+# 默认全局配置
+DEFAULT_PORT="11156"
+DEFAULT_PASS="github.taylor000"
+BIND_IP="127.0.0.1"
+
+# 检查是否为 Root
+[[ $EUID -ne 0 ]] && echo -e "${RED}错误：请使用 root 用户运行此脚本！${NC}" && exit 1
+
+# 空输入计数器
+empty_count=0
+
+# 基础依赖检测与安装
+check_base_dependencies() {
+    if ! command -v curl &> /dev/null; then
+        echo -e "${YELLOW}检测到系统未安装 curl，正在尝试自动安装...${NC}"
+        if [ -f /usr/bin/apt ]; then
+            apt update && apt install -y curl
+        elif [ -f /usr/bin/yum ]; then
+            yum install -y curl
+        else
+            echo -e "${RED}无法识别的包管理器，请手动安装 curl 后重试！${NC}"
+            exit 1
+        fi
+    fi
+}
+
+# 获取系统基本网络信息
+get_network_info() {
+    LOCAL_IP=$(curl -s4 https://api64.ipify.org || curl -s4 https://ifconfig.me || curl -s4 https://ip.gs)
+    LOCAL_GATEWAY=$(ip route | grep default | awk '{print $3}' | head -n1)
+    LOCAL_MASK="255.255.255.0"
+}
+
+# 开启 BBR 逻辑
+enable_bbr() {
+    echo -e "${YELLOW}正在检测并尝试开启 BBR...${NC}"
+    kernel_version=$(uname -r | cut -d- -f1)
+    if [[ $(echo "$kernel_version >= 4.9" | bc -l) -eq 1 ]]; then
+        echo -e "${GREEN}检测到内核版本 $kernel_version，支持直接开启 BBR。${NC}"
+        sed -i '/net.core.default_qdisc/d' /etc/sysctl.conf
+        sed -i '/net.ipv4.tcp_congestion_control/d' /etc/sysctl.conf
+        echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
+        echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
+        sysctl -p
+        if sysctl net.ipv4.tcp_congestion_control | grep -q bbr; then
+            echo -e "${GREEN}BBR 开启成功！${NC}"
+        else
+            echo -e "${RED}官方方式开启失败，尝试下载脚本...${NC}"
+            wget --no-check-certificate -O bbr.sh https://github.com/teddysun/across/raw/master/bbr.sh && chmod +x bbr.sh && ./bbr.sh
+        fi
+    else
+        echo -e "${YELLOW}内核版本过低，正在尝试通过脚本升级内核并安装 BBR...${NC}"
+        wget --no-check-certificate -O bbr.sh https://github.com/teddysun/across/raw/master/bbr.sh && chmod +x bbr.sh && ./bbr.sh
+    fi
+}
+
+# 检查并自动安装 Docker
+check_docker() {
+    if ! command -v docker &> /dev/null; then
+        echo -e "${YELLOW}检测到系统未安装 Docker，正在开始自动安装...${NC}"
+        curl -fsSL https://get.docker.com | bash
+        systemctl enable --now docker
+    fi
+}
+
+# 预检函数
+check_installed() {
+    if command -v "$1" &> /dev/null || [ -f "/usr/bin/$1" ] || [ -f "/usr/local/bin/$1" ] || [ -d "/www/server/panel" -a "$1" = "bt" ]; then
+        echo -e "${YELLOW}【预检提示】系统检测到已安装 ${BLUE}$2${NC}"
+        echo -e "${YELLOW}快捷命令: ${RED}$3${NC}"
+        read -p "是否仍然重新安装？(y/n, 默认n): " re_confirm
+        if [[ $re_confirm != [yY] ]]; then
+            return 1
+        fi
+    fi
+    return 0
+}
+
+# 精简页眉显示
+show_mini_header() {
+    echo -e "\n${BLUE}==================================================${NC}"
+    echo -e "${GREEN}             ${SCRIPT_NAME}                  ${NC}"
+    echo -e "${BLUE}     Author: ${YELLOW}${AUTHOR_GITHUB}${NC}"
+    echo -e "${BLUE}     快捷启动命令: ${RED}${SHORTCUT_CMD}${NC}"
+    echo -e "${BLUE}==================================================${NC}"
+    read -p "安装已结束。是否返回百宝箱主菜单？(y/n): " back_choice
+    if [[ $back_choice != [yY] ]]; then
+        echo -e "${GREEN}脚本已退出。${NC}"
+        exit 0
+    fi
+}
+
+# 菜单函数
+show_menu() {
+    clear
+    echo -e "${BLUE}==================================================${NC}"
+    echo -e "${GREEN}             ${SCRIPT_NAME}                  ${NC}"
+    echo -e "${BLUE}     Author: ${YELLOW}${AUTHOR_GITHUB}${NC}"
+    echo -e "${BLUE}     快捷启动命令: ${RED}${SHORTCUT_CMD}${NC}"
+    echo -e "${BLUE}==================================================${NC}"
+    echo -e "${YELLOW} 1.${NC} 显示系统基本信息与性能测试"
+    echo -e "${YELLOW} 2.${NC} 修改系统 root 密码"
+    echo -e "${YELLOW} 3.${NC} 修改 SSH 服务端口"
+    echo -e "${YELLOW} 4.${NC} 安装 BBR 加速插件"
+    echo -e "${YELLOW} 5.${NC} 安装 iperf3 网络测速工具"
+    echo -e "${YELLOW} 6.${NC} 安装 Debian 11 系统 (萌咖版)"
+    echo -e "${YELLOW} 7.${NC} 安装 Debian 12 系统 (萌咖版)"
+    echo -e "${YELLOW} 8.${NC} 安装 Win10 LTSC 系统 (秋水逸冰)"
+    echo -e "${YELLOW} 9.${NC} 安装 Win10 系统 (veip007)"
+    echo -e "${YELLOW} 10.${NC} 安装 aaPanel 面板 (mzwrt 备份版)"
+    echo -e "${YELLOW} 11.${NC} 安装 aaPanel 面板 (官方正式版)"
+    echo -e "${YELLOW} 12.${NC} 安装 Docker 运行环境"
+    echo -e "${YELLOW} 13.${NC} 安装 Realm 端口转发工具"
+    echo -e "${YELLOW} 14.${NC} 安装 ServerStatus 监控探针"
+    echo -e "${YELLOW} 15.${NC} 安装 Komari 监控探针 (Docker版)"
+    echo -e "${YELLOW} 16.${NC} 安装 Xray 代理服务 (233boy版)"
+    echo -e "${YELLOW} 17.${NC} 安装 3X-UI 面板 (Docker版)"
+    echo -e "${YELLOW} 18.${NC} 安装 XrayR 后端对接 (官方正式版)"
+    echo -e "${YELLOW} 19.${NC} 安装 XrayR 后端对接 (柚子备份版)"
+    echo -e "${YELLOW} 20.${NC} 安装 v2node 后端对接 (官方版)"
+    echo -e "${BLUE}--------------------------------------------------${NC}"
+    echo -e "${YELLOW} 21.${NC} ${RED}卸载并删除本脚本${NC}"
+    echo -e "${RED} 0.${NC} 退出脚本 (或双击回车)${NC}"
+    echo -e "${BLUE}==================================================${NC}"
+}
+
+# 脚本运行初始化
+check_base_dependencies
+
+while true; do
+    show_menu
+    read -p "请输入对应数字进行操作: " choice
+    
+    if [[ -z "$choice" ]]; then
+        ((empty_count++))
+        [[ $empty_count -ge 2 ]] && exit 0
+        continue
+    else
+        empty_count=0
+    fi
+
+    case $choice in
+        1) wget -qO- bench.sh | bash; read -p "按回车继续..." ;;
+        2) passwd root; read -p "按回车继续..." ;;
+        3)
+            CURRENT_SSH_PORT=$(grep -i "^Port" /etc/ssh/sshd_config | awk '{print $2}')
+            [ -z "$CURRENT_SSH_PORT" ] && CURRENT_SSH_PORT="22"
+            echo -e "${BLUE}当前端口: ${YELLOW}${CURRENT_SSH_PORT}${NC}"
+            read -p "继续修改？(y/n): " confirm_ssh
+            if [[ $confirm_ssh == [yY] ]]; then
+                read -p "新端口 (默认 $DEFAULT_PORT): " ssh_port
+                ssh_port=${ssh_port:-$DEFAULT_PORT}
+                sed -i "s/^#\?Port .*/Port $ssh_port/" /etc/ssh/sshd_config
+                systemctl restart ssh
+                echo -e "${GREEN}端口已成功修改。${NC}"
+            fi
+            read -p "按回车继续..." ;;
+        4) enable_bbr; read -p "按回车继续..." ;;
+        5)
+            check_installed "iperf3" "iperf3 测速工具" "iperf3" || { read -p "按回车继续..."; continue; }
+            if [ -f /usr/bin/apt ]; then apt update && apt install -y iperf3; elif [ -f /usr/bin/yum ]; then yum install -y epel-release && yum install -y iperf3; fi
+            echo -e "${GREEN}安装完成！${NC}服务端运行: ${RED}iperf3 -s${NC}"
+            read -p "按回车继续..." ;;
+        6 | 7)
+            ver="11" && [[ "$choice" == "7" ]] && ver="12"
+            read -p "设置 Debian $ver 密码 (默认 $DEFAULT_PASS): " dd_pass
+            dd_pass=${dd_pass:-$DEFAULT_PASS}
+            bash <(wget --no-check-certificate -qO- 'https://www.moeelf.com/attachment/LinuxShell/InstallNET.sh') -d "$ver" -v 64 -a -p "$dd_pass"
+            ;;
+        8)
+            get_network_info
+            read -p "设置 Win10 密码 (默认 $DEFAULT_PASS): " win_pass
+            win_pass=${win_pass:-$DEFAULT_PASS}
+            wget -qO- inst.sh | bash -s - -n $LOCAL_IP,$LOCAL_MASK,$LOCAL_GATEWAY -p "$win_pass" -t https://dl.lamp.sh/vhd/zh-cn_windows10_ltsc.xz
+            ;;
+        9)
+            read -p "设置 Win10 密码 (默认 $DEFAULT_PASS): " v_pass
+            v_pass=${v_pass:-$DEFAULT_PASS}
+            read -p "设置 RDP 端口 (默认 3389): " v_port
+            v_port=${v_port:-3389}
+            wget -N --no-check-certificate https://raw.githubusercontent.com/veip007/dd/master/InstallNET.sh && chmod +x InstallNET.sh && ./InstallNET.sh -d 10 -v 64 -p "$v_pass" -port "$v_port"
+            ;;
+        10 | 11)
+            check_installed "bt" "aaPanel 面板" "bt" || { read -p "按回车继续..."; continue; }
+            if [[ $choice == 10 ]]; then
+                wget https://raw.githubusercontent.com/mzwrt/aapanel-6.8.37-backup/main/install.sh && bash install.sh && rm -rf install.sh
+            else
+                URL=https://www.aapanel.com/script/install_panel_en.sh
+                curl -ksSO $URL || wget --no-check-certificate -O install_panel_en.sh $URL
+                bash install_panel_en.sh ipssl
+            fi
+            show_mini_header ;;
+        12) check_installed "docker" "Docker" "docker ps" || { read -p "按回车继续..."; continue; }; check_docker; read -p "按回车继续..." ;;
+        13)
+            check_installed "realm" "Realm" "realm" || { read -p "按回车继续..."; continue; }
+            command -v curl &> /dev/null || (apt update && apt install -y curl || yum install -y curl)
+            curl -L https://raw.githubusercontent.com/wcwq98/realm/refs/heads/main/realm.sh -o realm.sh && chmod +x realm.sh && ./realm.sh
+            ;;
+        14)
+            if docker ps -a --format '{{.Names}}' | grep -q "^status$"; then
+                read -p "探针容器已存在，是否重装？(y/n): " re_status
+                [[ $re_status != [yY] ]] && continue
+                docker rm -f status &>/dev/null
+            fi
+            check_docker; get_network_info
+            read -p "探针内部监听端口 (默认 $DEFAULT_PORT): " s_port
+            s_port=${s_port:-$DEFAULT_PORT}
+            wget --no-check-certificate -qO ~/serverstatus-config.json https://raw.githubusercontent.com/cppla/ServerStatus/master/server/config.json && mkdir -p ~/serverstatus-monthtraffic
+            docker run -d --restart=always --name=status -v ~/serverstatus-config.json:/ServerStatus/server/config.json -v ~/serverstatus-monthtraffic:/usr/share/nginx/html/json -p ${BIND_IP}:${s_port}:80 -p 35601:35601 cppla/serverstatus:1.1.5
+            echo -e "${GREEN}探针安装完成！反代目标: http://127.0.0.1:${s_port}${NC}"
+            read -p "按回车继续..." ;;
+        15)
+            check_docker
+            read -p "设置安装目录 (默认 ~/komari): " k_dir
+            k_dir=${k_dir:-~/komari}
+            read -p "设置容器访问端口 (默认 25774): " k_port
+            k_port=${k_port:-25774}
+            read -p "设置 Docker 容器名称 (默认 komari): " k_name
+            k_name=${k_name:-komari}
+
+            if docker ps -a --format '{{.Names}}' | grep -q "^${k_name}$"; then
+                read -p "检测到名为 ${k_name} 的容器已存在，是否删除重装？(y/n): " re_k
+                [[ $re_k != [yY] ]] && continue
+                docker rm -f "$k_name" &>/dev/null
+            fi
+
+            mkdir -p "$k_dir/data"
+            docker run -d \
+              -p ${BIND_IP}:${k_port}:25774 \
+              -v "$k_dir/data:/app/data" \
+              --name "$k_name" \
+              --restart unless-stopped \
+              ghcr.io/komari-monitor/komari:latest
+            
+            get_network_info
+            echo -e "\n${GREEN}Komari 安装完成！${NC}"
+            echo -e "访问地址: ${BLUE}http://${LOCAL_IP}:${k_port}${NC} (本地回环: http://127.0.0.1:${k_port})"
+            read -p "按回车继续..." ;;
+        16)
+            check_installed "xray" "Xray" "xray" || { read -p "按回车继续..."; continue; }
+            bash <(wget -qO- -o- https://github.com/233boy/Xray/raw/main/install.sh)
+            show_mini_header ;;
+        17)
+            check_docker
+            read -p "设置 Docker 容器名称 (默认 3x-ui): " x_name
+            x_name=${x_name:-3x-ui}
+            read -p "设置面板映射端口 (默认 2053): " x_port
+            x_port=${x_port:-2053}
+
+            if docker ps -a --format '{{.Names}}' | grep -q "^${x_name}$"; then
+                read -p "检测到名为 ${x_name} 的容器已存在，是否删除重装？(y/n): " re_x
+                [[ $re_x != [yY] ]] && continue
+                docker rm -f "$x_name" &>/dev/null
+            fi
+
+            mkdir -p db
+            docker run -itd \
+              --name "$x_name" \
+              -p ${BIND_IP}:${x_port}:2053 \
+              -e XUI_PANEL_PORT=2053 \
+              -v "$PWD/db/":/etc/x-ui/ \
+              --restart unless-stopped \
+              ghcr.io/mhsanaei/3x-ui:latest
+
+            get_network_info
+            echo -e "\n${GREEN}3X-UI Docker 安装完成！${NC}"
+            echo -e "访问地址: ${BLUE}http://${LOCAL_IP}:${x_port}${NC} (本地回环: http://127.0.0.1:${x_port})"
+            show_mini_header ;;
+        18)
+            check_installed "XrayR" "XrayR 官方" "XrayR" || { read -p "按回车继续..."; continue; }
+            bash <(curl -Ls https://raw.githubusercontent.com/XrayR-project/XrayR-release/master/install.sh)
+            show_mini_header ;;
+        19)
+            check_installed "xrayr" "XrayR 柚子" "xrayr" || { read -p "按回车继续..."; continue; }
+            wget -N https://raw.githubusercontent.com/youzi3/XrayR-script/main/install.sh && bash install.sh
+            show_mini_header ;;
+        20)
+            check_installed "v2node" "v2node" "v2node" || { read -p "按回车继续..."; continue; }
+            wget -N https://raw.githubusercontent.com/wyx2685/v2node/master/script/install.sh && bash install.sh
+            show_mini_header ;;
+        21)
+            read -p "确定要删除本脚本及快捷命令吗？(y/n): " del_confirm
+            if [[ $del_confirm == [yY] ]]; then
+                rm -f /usr/local/bin/${SHORTCUT_CMD}
+                echo -e "${GREEN}快捷命令已删除。${NC}"
+                rm -f "$0"
+                echo -e "${GREEN}脚本文件已删除。再见！${NC}"
+                exit 0
+            fi
+            ;;
+        0) exit 0 ;;
+        *) echo -e "${RED}选择无效。${NC}"; sleep 1 ;;
+    esac
+done
