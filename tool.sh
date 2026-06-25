@@ -16,8 +16,8 @@ NC='\033[0m'
 AUTHOR_GITHUB="https://github.com/Taylor000"
 SCRIPT_NAME="一个人的脚本百宝箱"
 SHORTCUT_CMD="tool"
-SCRIPT_VERSION="2.1.1"
-MIN_SUPPORTED_VERSION="2.1.0"
+SCRIPT_VERSION="2.1.2"
+MIN_SUPPORTED_VERSION="2.1.2"
 SCRIPT_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool/master/tool.sh"
 USAGE_COUNTER_URL="https://hits.sh/github.com/Taylor000/tool.svg?label=uses&color=blue"
 
@@ -142,7 +142,7 @@ check_script_update() {
     exec "$current_script"
 }
 
-disable_eol_bullseye_backports() {
+repair_bullseye_sources() {
     local source_file backup_file temp_file changed=0
     local -a source_files=()
 
@@ -154,7 +154,9 @@ disable_eol_bullseye_backports() {
 
     for source_file in "${source_files[@]}"; do
         if [[ $source_file == *.list || $source_file == /etc/apt/sources.list ]] &&
-            grep -Eq '^[[:space:]]*deb([[:space:]]+\[[^]]+\])?[[:space:]]+[^#[:space:]]+[[:space:]]+bullseye-backports([[:space:]]|$)' "$source_file"; then
+            grep -Eq \
+                '^[[:space:]]*deb([[:space:]]+\[[^]]+\])?[[:space:]]+[^#[:space:]]+[[:space:]]+(bullseye-backports|bullseye/updates)([[:space:]]|$)' \
+                "$source_file"; then
             backup_file="${source_file}.tool-backup-$(date +%Y%m%d%H%M%S)"
             cp -a "$source_file" "$backup_file" || {
                 error "无法备份软件源文件：$source_file"
@@ -163,20 +165,28 @@ disable_eol_bullseye_backports() {
             sed -i -E \
                 '/^[[:space:]]*deb([[:space:]]+\[[^]]+\])?[[:space:]]+[^#[:space:]]+[[:space:]]+bullseye-backports([[:space:]]|$)/s/^/# 已由 tool 禁用（bullseye-backports 已停止服务）: /' \
                 "$source_file"
-            warn "已禁用失效源：$source_file 中的 bullseye-backports"
+            sed -i -E \
+                '/^[[:space:]]*deb([[:space:]]+\[[^]]+\])?[[:space:]]+https?:\/\/security\.debian\.org(\/debian-security)?\/?[[:space:]]+bullseye\/updates([[:space:]]|$)/{
+                    s#https?://security\.debian\.org(/debian-security)?/?#http://security.debian.org/debian-security#
+                    s#bullseye/updates#bullseye-security#
+                }' \
+                "$source_file"
+            warn "已修复 Debian 11 失效软件源：$source_file"
             info "原文件备份：$backup_file"
             changed=1
         elif [[ $source_file == *.sources ]] &&
-            grep -Eiq '^[[:space:]]*Suites:.*(^|[[:space:]])bullseye-backports([[:space:]]|$)' "$source_file"; then
+            grep -Eiq '^[[:space:]]*Suites:.*(bullseye-backports|bullseye/updates)' "$source_file"; then
             temp_file=$(mktemp /tmp/tool-apt-source.XXXXXX) || return 1
             awk '
                 BEGIN { RS="" }
                 {
                     count = split($0, line, "\n")
                     suites_line = 0
+                    uris_line = 0
                     enabled_line = 0
                     enabled_no = 0
                     remaining = ""
+                    old_security = 0
 
                     for (i = 1; i <= count; i++) {
                         if (line[i] ~ /^[[:space:]]*Enabled:[[:space:]]*no([[:space:]]|$)/) {
@@ -184,6 +194,12 @@ disable_eol_bullseye_backports() {
                         }
                         if (line[i] ~ /^[[:space:]]*Enabled:/) {
                             enabled_line = i
+                        }
+                        if (line[i] ~ /^[[:space:]]*URIs:/) {
+                            uris_line = i
+                            if (line[i] ~ /security\.debian\.org([[:space:]]|\/?$)/) {
+                                old_security = 1
+                            }
                         }
                         if (line[i] ~ /^[[:space:]]*Suites:/) {
                             value = line[i]
@@ -194,6 +210,9 @@ disable_eol_bullseye_backports() {
                             for (j = 1; j <= fields; j++) {
                                 if (suite[j] == "bullseye-backports") {
                                     found = 1
+                                } else if (suite[j] == "bullseye/updates") {
+                                    found = 1
+                                    remaining = remaining (remaining == "" ? "" : " ") "bullseye-security"
                                 } else if (suite[j] != "") {
                                     remaining = remaining (remaining == "" ? "" : " ") suite[j]
                                 }
@@ -216,6 +235,9 @@ disable_eol_bullseye_backports() {
                             }
                         }
                     }
+                    if (old_security && uris_line) {
+                        sub(/https?:\/\/security\.debian\.org\/?/, "http://security.debian.org/debian-security", line[uris_line])
+                    }
 
                     for (i = 1; i <= count; i++) {
                         printf "%s\n", line[i]
@@ -232,7 +254,7 @@ disable_eol_bullseye_backports() {
                         error "无法更新 Deb822 软件源文件：$source_file"
                         return 1
                     }
-                warn "已禁用 Deb822 失效源：$source_file 中的 bullseye-backports"
+                warn "已修复 Deb822 Debian 11 软件源：$source_file"
                 info "原文件备份：$backup_file"
                 changed=1
             fi
@@ -243,10 +265,11 @@ disable_eol_bullseye_backports() {
     return $(( changed == 1 ? 0 : 1 ))
 }
 
-has_active_bullseye_backports() {
+has_invalid_bullseye_sources() {
     local source_file
 
-    if grep -RqsE '^[[:space:]]*deb([[:space:]]+\[[^]]+\])?[[:space:]]+[^#[:space:]]+[[:space:]]+bullseye-backports([[:space:]]|$)' \
+    if grep -RqsE \
+        '^[[:space:]]*deb([[:space:]]+\[[^]]+\])?[[:space:]]+[^#[:space:]]+[[:space:]]+(bullseye-backports|bullseye/updates)([[:space:]]|$)' \
         /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null; then
         return 0
     fi
@@ -262,7 +285,7 @@ has_active_bullseye_backports() {
                     if (line[i] ~ /^[[:space:]]*Enabled:[[:space:]]*no([[:space:]]|$)/) {
                         enabled = 0
                     }
-                    if (line[i] ~ /^[[:space:]]*Suites:.*(^|[[:space:]])bullseye-backports([[:space:]]|$)/) {
+                    if (line[i] ~ /^[[:space:]]*Suites:.*(bullseye-backports|bullseye\/updates)([[:space:]]|$)/) {
                         has_suite = 1
                     }
                 }
@@ -282,14 +305,14 @@ has_active_bullseye_backports() {
 
 update_package_index() {
     if command_exists apt-get; then
-        if has_active_bullseye_backports; then
-            warn "检测到已停止服务的 bullseye-backports，正在自动禁用..."
-            disable_eol_bullseye_backports || {
-                error "bullseye-backports 自动禁用失败。"
+        if has_invalid_bullseye_sources; then
+            warn "检测到 Debian 11 失效软件源，正在自动修复..."
+            repair_bullseye_sources || {
+                error "Debian 11 软件源自动修复失败。"
                 return 1
             }
-            if has_active_bullseye_backports; then
-                error "仍检测到活动的 bullseye-backports，APT 更新已停止。"
+            if has_invalid_bullseye_sources; then
+                error "仍检测到 Debian 11 失效软件源，APT 更新已停止。"
                 return 1
             fi
         fi
