@@ -49,22 +49,48 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
-show_apt_source_hint() {
-    local bad_sources
-    bad_sources=$(grep -RhsE '^[[:space:]]*deb .*-(backports|updates|security)' \
-        /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null || true)
-    if [[ -n "$bad_sources" ]]; then
-        warn "检测到以下扩展软件源，请检查其中是否包含已停止维护的发行版："
-        printf '%s\n' "$bad_sources"
-    fi
+disable_eol_bullseye_backports() {
+    local source_file backup_file changed=0
+    local -a source_files=()
+
+    [[ -f /etc/apt/sources.list ]] && source_files+=(/etc/apt/sources.list)
+    while IFS= read -r -d '' source_file; do
+        source_files+=("$source_file")
+    done < <(find /etc/apt/sources.list.d -maxdepth 1 -type f \
+        \( -name '*.list' -o -name '*.sources' \) -print0 2>/dev/null)
+
+    for source_file in "${source_files[@]}"; do
+        if grep -Eq '^[[:space:]]*deb([[:space:]]+\[[^]]+\])?[[:space:]]+[^#[:space:]]+[[:space:]]+bullseye-backports([[:space:]]|$)' "$source_file"; then
+            backup_file="${source_file}.tool-backup-$(date +%Y%m%d%H%M%S)"
+            cp -a "$source_file" "$backup_file" || {
+                error "无法备份软件源文件：$source_file"
+                return 1
+            }
+            sed -i -E \
+                '/^[[:space:]]*deb([[:space:]]+\[[^]]+\])?[[:space:]]+[^#[:space:]]+[[:space:]]+bullseye-backports([[:space:]]|$)/s/^/# 已由 tool 禁用（bullseye-backports 已停止服务）: /' \
+                "$source_file"
+            warn "已禁用失效源：$source_file 中的 bullseye-backports"
+            info "原文件备份：$backup_file"
+            changed=1
+        fi
+    done
+
+    return $(( changed == 1 ? 0 : 1 ))
 }
 
 update_package_index() {
     if command_exists apt-get; then
         if ! apt-get update; then
-            error "APT 软件源更新失败，安装已停止。"
-            show_apt_source_hint
-            return 1
+            if disable_eol_bullseye_backports; then
+                warn "正在禁用失效源后重试 APT 更新..."
+                apt-get update || {
+                    error "APT 软件源更新仍然失败，安装已停止。"
+                    return 1
+                }
+            else
+                error "APT 软件源更新失败，且未发现可自动修复的 bullseye-backports。"
+                return 1
+            fi
         fi
     elif command_exists dnf; then
         dnf makecache || {
