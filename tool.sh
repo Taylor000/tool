@@ -16,8 +16,8 @@ NC='\033[0m'
 AUTHOR_GITHUB="https://github.com/Taylor000"
 SCRIPT_NAME="一个人的脚本百宝箱"
 SHORTCUT_CMD="tool"
-SCRIPT_VERSION="2.1.2"
-MIN_SUPPORTED_VERSION="2.1.2"
+SCRIPT_VERSION="2.1.3"
+MIN_SUPPORTED_VERSION="2.1.3"
 SCRIPT_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool/master/tool.sh"
 USAGE_COUNTER_URL="https://hits.sh/github.com/Taylor000/tool.svg?label=uses&color=blue"
 
@@ -142,18 +142,41 @@ check_script_update() {
     exec "$current_script"
 }
 
+get_apt_source_files() {
+    local source_file resolved_file
+    local -A seen=()
+
+    if [[ -e /etc/apt/sources.list ]]; then
+        resolved_file=$(readlink -f /etc/apt/sources.list 2>/dev/null || printf '%s' /etc/apt/sources.list)
+        seen["$resolved_file"]=1
+        printf '%s\0' "$resolved_file"
+    fi
+    while IFS= read -r -d '' source_file; do
+        resolved_file=$(readlink -f "$source_file" 2>/dev/null || printf '%s' "$source_file")
+        [[ -n ${seen["$resolved_file"]+x} ]] && continue
+        seen["$resolved_file"]=1
+        printf '%s\0' "$resolved_file"
+    done < <(find /etc/apt/sources.list.d -maxdepth 1 -type f \
+        \( -name '*.list' -o -name '*.sources' \) -print0 2>/dev/null)
+    while IFS= read -r -d '' source_file; do
+        resolved_file=$(readlink -f "$source_file" 2>/dev/null || true)
+        [[ -z "$resolved_file" || -n ${seen["$resolved_file"]+x} ]] && continue
+        seen["$resolved_file"]=1
+        printf '%s\0' "$resolved_file"
+    done < <(find /etc/apt/sources.list.d -maxdepth 1 -type l \
+        \( -name '*.list' -o -name '*.sources' \) -print0 2>/dev/null)
+}
+
 repair_bullseye_sources() {
     local source_file backup_file temp_file changed=0
     local -a source_files=()
 
-    [[ -f /etc/apt/sources.list ]] && source_files+=(/etc/apt/sources.list)
     while IFS= read -r -d '' source_file; do
         source_files+=("$source_file")
-    done < <(find /etc/apt/sources.list.d -maxdepth 1 -type f \
-        \( -name '*.list' -o -name '*.sources' \) -print0 2>/dev/null)
+    done < <(get_apt_source_files)
 
     for source_file in "${source_files[@]}"; do
-        if [[ $source_file == *.list || $source_file == /etc/apt/sources.list ]] &&
+        if ! grep -Eq '^[[:space:]]*(Types|Suites):' "$source_file" &&
             grep -Eq \
                 '^[[:space:]]*deb([[:space:]]+\[[^]]+\])?[[:space:]]+[^#[:space:]]+[[:space:]]+(bullseye-backports|bullseye/updates)([[:space:]]|$)' \
                 "$source_file"; then
@@ -174,7 +197,7 @@ repair_bullseye_sources() {
             warn "已修复 Debian 11 失效软件源：$source_file"
             info "原文件备份：$backup_file"
             changed=1
-        elif [[ $source_file == *.sources ]] &&
+        elif grep -Eq '^[[:space:]]*(Types|Suites):' "$source_file" &&
             grep -Eiq '^[[:space:]]*Suites:.*(bullseye-backports|bullseye/updates)' "$source_file"; then
             temp_file=$(mktemp /tmp/tool-apt-source.XXXXXX) || return 1
             awk '
@@ -268,13 +291,14 @@ repair_bullseye_sources() {
 has_invalid_bullseye_sources() {
     local source_file
 
-    if grep -RqsE \
-        '^[[:space:]]*deb([[:space:]]+\[[^]]+\])?[[:space:]]+[^#[:space:]]+[[:space:]]+(bullseye-backports|bullseye/updates)([[:space:]]|$)' \
-        /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null; then
-        return 0
-    fi
-
     while IFS= read -r -d '' source_file; do
+        if ! grep -Eq '^[[:space:]]*(Types|Suites):' "$source_file" &&
+            grep -Eq \
+                '^[[:space:]]*deb([[:space:]]+\[[^]]+\])?[[:space:]]+[^#[:space:]]+[[:space:]]+(bullseye-backports|bullseye/updates)([[:space:]]|$)' \
+                "$source_file"; then
+            return 0
+        fi
+        grep -Eq '^[[:space:]]*(Types|Suites):' "$source_file" || continue
         if awk '
             BEGIN { RS="" }
             {
@@ -298,7 +322,7 @@ has_invalid_bullseye_sources() {
         elif [[ $? -eq 10 ]]; then
             return 0
         fi
-    done < <(find /etc/apt/sources.list.d -maxdepth 1 -type f -name '*.sources' -print0 2>/dev/null)
+    done < <(get_apt_source_files)
 
     return 1
 }
