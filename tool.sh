@@ -16,8 +16,8 @@ NC='\033[0m'
 AUTHOR_GITHUB="https://github.com/Taylor000"
 SCRIPT_NAME="一个人的脚本百宝箱"
 SHORTCUT_CMD="tool"
-SCRIPT_VERSION="2.1.3"
-MIN_SUPPORTED_VERSION="2.1.3"
+SCRIPT_VERSION="2.1.4"
+MIN_SUPPORTED_VERSION="2.1.4"
 SCRIPT_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool/master/tool.sh"
 USAGE_COUNTER_URL="https://hits.sh/github.com/Taylor000/tool.svg?label=uses&color=blue"
 
@@ -143,11 +143,25 @@ check_script_update() {
 }
 
 get_apt_source_files() {
-    local source_file resolved_file
+    local apt_etc source_list source_parts source_file resolved_file
     local -A seen=()
 
-    if [[ -e /etc/apt/sources.list ]]; then
-        resolved_file=$(readlink -f /etc/apt/sources.list 2>/dev/null || printf '%s' /etc/apt/sources.list)
+    apt_etc=$(apt-config shell value Dir::Etc 2>/dev/null |
+        sed -nE "s/^value='(.*)'$/\1/p")
+    source_list=$(apt-config shell value Dir::Etc::sourcelist 2>/dev/null |
+        sed -nE "s/^value='(.*)'$/\1/p")
+    source_parts=$(apt-config shell value Dir::Etc::sourceparts 2>/dev/null |
+        sed -nE "s/^value='(.*)'$/\1/p")
+
+    apt_etc=${apt_etc:-etc/apt}
+    source_list=${source_list:-sources.list}
+    source_parts=${source_parts:-sources.list.d}
+    [[ $apt_etc == /* ]] || apt_etc="/$apt_etc"
+    [[ $source_list == /* ]] || source_list="$apt_etc/$source_list"
+    [[ $source_parts == /* ]] || source_parts="$apt_etc/$source_parts"
+
+    if [[ -e "$source_list" ]]; then
+        resolved_file=$(readlink -f "$source_list" 2>/dev/null || printf '%s' "$source_list")
         seen["$resolved_file"]=1
         printf '%s\0' "$resolved_file"
     fi
@@ -156,14 +170,16 @@ get_apt_source_files() {
         [[ -n ${seen["$resolved_file"]+x} ]] && continue
         seen["$resolved_file"]=1
         printf '%s\0' "$resolved_file"
-    done < <(find /etc/apt/sources.list.d -maxdepth 1 -type f \
+    done < <(find -L "$source_parts" -maxdepth 1 -type f \
         \( -name '*.list' -o -name '*.sources' \) -print0 2>/dev/null)
+
+    # 兼容通过 apt.conf 改写路径或非标准目录部署的软件源。
     while IFS= read -r -d '' source_file; do
         resolved_file=$(readlink -f "$source_file" 2>/dev/null || true)
         [[ -z "$resolved_file" || -n ${seen["$resolved_file"]+x} ]] && continue
         seen["$resolved_file"]=1
         printf '%s\0' "$resolved_file"
-    done < <(find /etc/apt/sources.list.d -maxdepth 1 -type l \
+    done < <(find -L "$apt_etc" -type f \
         \( -name '*.list' -o -name '*.sources' \) -print0 2>/dev/null)
 }
 
@@ -328,6 +344,8 @@ has_invalid_bullseye_sources() {
 }
 
 update_package_index() {
+    local apt_output
+
     if command_exists apt-get; then
         if has_invalid_bullseye_sources; then
             warn "检测到 Debian 11 失效软件源，正在自动修复..."
@@ -341,10 +359,22 @@ update_package_index() {
             fi
         fi
 
-        if ! apt-get update; then
+        apt_output=$(mktemp /tmp/tool-apt-update.XXXXXX) || return 1
+        if ! apt-get update 2>&1 | tee "$apt_output"; then
+            if grep -Eq 'bullseye-backports|bullseye/updates' "$apt_output"; then
+                warn "APT 返回了已知 Debian 11 失效源，正在执行二次扫描修复..."
+                if repair_bullseye_sources && ! has_invalid_bullseye_sources; then
+                    if apt-get update; then
+                        rm -f "$apt_output"
+                        return 0
+                    fi
+                fi
+            fi
+            rm -f "$apt_output"
             error "APT 软件源更新失败，安装已停止。"
             return 1
         fi
+        rm -f "$apt_output"
     elif command_exists dnf; then
         dnf makecache || {
             error "DNF 软件源更新失败。"
