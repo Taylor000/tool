@@ -16,6 +16,10 @@ NC='\033[0m'
 AUTHOR_GITHUB="https://github.com/Taylor000"
 SCRIPT_NAME="一个人的脚本百宝箱"
 SHORTCUT_CMD="tool"
+SCRIPT_VERSION="2.1.0"
+MIN_SUPPORTED_VERSION="2.1.0"
+SCRIPT_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool/master/tool.sh"
+USAGE_COUNTER_URL="https://hits.sh/github.com/Taylor000/tool.svg?label=uses&color=blue"
 
 # 默认全局配置
 DEFAULT_PORT="11156"
@@ -47,6 +51,95 @@ pause_menu() {
 
 command_exists() {
     command -v "$1" >/dev/null 2>&1
+}
+
+fetch_url() {
+    local url=$1
+
+    if command_exists curl; then
+        curl --fail --location --silent --show-error \
+            --connect-timeout 10 --max-time 20 --retry 1 \
+            -A "Taylor000-tool/${SCRIPT_VERSION}" "$url"
+    elif command_exists wget; then
+        wget --https-only --quiet --timeout=20 --tries=2 \
+            --user-agent="Taylor000-tool/${SCRIPT_VERSION}" -O- "$url"
+    else
+        return 1
+    fi
+}
+
+record_usage_count() {
+    local counter_svg
+
+    if [[ ${TOOL_USAGE_RECORDED:-0} == "1" ]]; then
+        USAGE_COUNT=${TOOL_USAGE_COUNT:-"暂不可用"}
+        return 0
+    fi
+
+    counter_svg=$(fetch_url "$USAGE_COUNTER_URL" 2>/dev/null) || {
+        USAGE_COUNT="暂不可用"
+        export TOOL_USAGE_RECORDED=1
+        export TOOL_USAGE_COUNT="$USAGE_COUNT"
+        return 0
+    }
+    USAGE_COUNT=$(printf '%s' "$counter_svg" |
+        sed -nE 's/.*aria-label="uses: ([0-9]+)".*/\1/p' |
+        head -n 1)
+    USAGE_COUNT=${USAGE_COUNT:-"暂不可用"}
+    export TOOL_USAGE_RECORDED=1
+    export TOOL_USAGE_COUNT="$USAGE_COUNT"
+}
+
+check_script_update() {
+    local remote_script remote_version remote_min_version current_script answer force_update=0
+
+    remote_script=$(mktemp /tmp/tool-update.XXXXXX) || return 0
+    if ! download_script "${SCRIPT_RAW_URL}?t=$(date +%s)" "$remote_script"; then
+        rm -f "$remote_script"
+        warn "暂时无法检查脚本更新，将继续运行当前版本。"
+        return 0
+    fi
+
+    remote_version=$(sed -nE 's/^SCRIPT_VERSION="([^"]+)".*/\1/p' "$remote_script" | head -n 1)
+    remote_min_version=$(sed -nE 's/^MIN_SUPPORTED_VERSION="([^"]+)".*/\1/p' "$remote_script" | head -n 1)
+    if [[ -z "$remote_version" ]]; then
+        rm -f "$remote_script"
+        warn "远端脚本缺少版本号，已跳过自动更新。"
+        return 0
+    fi
+
+    if [[ $(printf '%s\n%s\n' "$SCRIPT_VERSION" "$remote_version" | sort -V | tail -n 1) != "$remote_version" ||
+          "$SCRIPT_VERSION" == "$remote_version" ]]; then
+        rm -f "$remote_script"
+        return 0
+    fi
+
+    if [[ -n "$remote_min_version" &&
+          $(printf '%s\n%s\n' "$SCRIPT_VERSION" "$remote_min_version" | sort -V | head -n 1) == "$SCRIPT_VERSION" &&
+          "$SCRIPT_VERSION" != "$remote_min_version" ]]; then
+        force_update=1
+    fi
+
+    if (( force_update == 1 )); then
+        error "当前版本 v${SCRIPT_VERSION} 低于最低支持版本 v${remote_min_version}，必须更新后才能继续。"
+    else
+        warn "发现新版本：${SCRIPT_VERSION} → ${remote_version}"
+        read -r -p "是否立即更新并重新启动？(Y/n, 默认Y): " answer
+        if [[ $answer =~ ^[Nn]$ ]]; then
+            rm -f "$remote_script"
+            return 0
+        fi
+    fi
+
+    current_script=$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")
+    if ! install -m 755 "$remote_script" "$current_script"; then
+        error "脚本更新失败，当前版本未被替换。"
+        rm -f "$remote_script"
+        return 0
+    fi
+    rm -f "$remote_script"
+    info "脚本已更新到 ${remote_version}，正在重新启动..."
+    exec "$current_script"
 }
 
 disable_eol_bullseye_backports() {
@@ -367,6 +460,7 @@ show_menu() {
     echo -e "${GREEN}             ${SCRIPT_NAME}                  ${NC}"
     echo -e "${BLUE}     Author: ${YELLOW}${AUTHOR_GITHUB}${NC}"
     echo -e "${BLUE}     快捷启动命令: ${RED}${SHORTCUT_CMD}${NC}"
+    echo -e "${BLUE}     当前版本: ${YELLOW}v${SCRIPT_VERSION}${NC}  累计调用: ${YELLOW}${USAGE_COUNT:-暂不可用}${NC}"
     echo -e "${BLUE}==================================================${NC}"
     echo -e "${YELLOW} 1.${NC} 显示系统基本信息与性能测试"
     echo -e "${YELLOW} 2.${NC} 修改系统 root 密码"
@@ -395,7 +489,9 @@ show_menu() {
 }
 
 # 脚本运行初始化
+record_usage_count
 check_base_dependencies
+check_script_update
 
 while true; do
     show_menu
