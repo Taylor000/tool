@@ -16,7 +16,7 @@ NC='\033[0m'
 AUTHOR_GITHUB="https://github.com/Taylor000"
 SCRIPT_NAME="一个人的脚本百宝箱"
 SHORTCUT_CMD="tool"
-SCRIPT_VERSION="2.1.0"
+SCRIPT_VERSION="2.1.1"
 MIN_SUPPORTED_VERSION="2.1.0"
 SCRIPT_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool/master/tool.sh"
 USAGE_COUNTER_URL="https://hits.sh/github.com/Taylor000/tool.svg?label=uses&color=blue"
@@ -143,7 +143,7 @@ check_script_update() {
 }
 
 disable_eol_bullseye_backports() {
-    local source_file backup_file changed=0
+    local source_file backup_file temp_file changed=0
     local -a source_files=()
 
     [[ -f /etc/apt/sources.list ]] && source_files+=(/etc/apt/sources.list)
@@ -153,7 +153,8 @@ disable_eol_bullseye_backports() {
         \( -name '*.list' -o -name '*.sources' \) -print0 2>/dev/null)
 
     for source_file in "${source_files[@]}"; do
-        if grep -Eq '^[[:space:]]*deb([[:space:]]+\[[^]]+\])?[[:space:]]+[^#[:space:]]+[[:space:]]+bullseye-backports([[:space:]]|$)' "$source_file"; then
+        if [[ $source_file == *.list || $source_file == /etc/apt/sources.list ]] &&
+            grep -Eq '^[[:space:]]*deb([[:space:]]+\[[^]]+\])?[[:space:]]+[^#[:space:]]+[[:space:]]+bullseye-backports([[:space:]]|$)' "$source_file"; then
             backup_file="${source_file}.tool-backup-$(date +%Y%m%d%H%M%S)"
             cp -a "$source_file" "$backup_file" || {
                 error "无法备份软件源文件：$source_file"
@@ -165,25 +166,137 @@ disable_eol_bullseye_backports() {
             warn "已禁用失效源：$source_file 中的 bullseye-backports"
             info "原文件备份：$backup_file"
             changed=1
+        elif [[ $source_file == *.sources ]] &&
+            grep -Eiq '^[[:space:]]*Suites:.*(^|[[:space:]])bullseye-backports([[:space:]]|$)' "$source_file"; then
+            temp_file=$(mktemp /tmp/tool-apt-source.XXXXXX) || return 1
+            awk '
+                BEGIN { RS="" }
+                {
+                    count = split($0, line, "\n")
+                    suites_line = 0
+                    enabled_line = 0
+                    enabled_no = 0
+                    remaining = ""
+
+                    for (i = 1; i <= count; i++) {
+                        if (line[i] ~ /^[[:space:]]*Enabled:[[:space:]]*no([[:space:]]|$)/) {
+                            enabled_no = 1
+                        }
+                        if (line[i] ~ /^[[:space:]]*Enabled:/) {
+                            enabled_line = i
+                        }
+                        if (line[i] ~ /^[[:space:]]*Suites:/) {
+                            value = line[i]
+                            sub(/^[[:space:]]*Suites:[[:space:]]*/, "", value)
+                            fields = split(value, suite, /[[:space:]]+/)
+                            found = 0
+                            remaining = ""
+                            for (j = 1; j <= fields; j++) {
+                                if (suite[j] == "bullseye-backports") {
+                                    found = 1
+                                } else if (suite[j] != "") {
+                                    remaining = remaining (remaining == "" ? "" : " ") suite[j]
+                                }
+                            }
+                            if (found) {
+                                suites_line = i
+                            }
+                        }
+                    }
+
+                    if (suites_line && !enabled_no) {
+                        if (remaining != "") {
+                            line[suites_line] = "Suites: " remaining
+                        } else {
+                            line[suites_line] = "# Suites: bullseye-backports (disabled by tool)"
+                            if (enabled_line) {
+                                line[enabled_line] = "Enabled: no"
+                            } else {
+                                line[++count] = "Enabled: no"
+                            }
+                        }
+                    }
+
+                    for (i = 1; i <= count; i++) {
+                        printf "%s\n", line[i]
+                    }
+                    printf "\n"
+                }
+            ' "$source_file" > "$temp_file"
+
+            if ! cmp -s "$source_file" "$temp_file"; then
+                backup_file="${source_file}.tool-backup-$(date +%Y%m%d%H%M%S)"
+                cp -a "$source_file" "$backup_file" &&
+                    install -m 644 "$temp_file" "$source_file" || {
+                        rm -f "$temp_file"
+                        error "无法更新 Deb822 软件源文件：$source_file"
+                        return 1
+                    }
+                warn "已禁用 Deb822 失效源：$source_file 中的 bullseye-backports"
+                info "原文件备份：$backup_file"
+                changed=1
+            fi
+            rm -f "$temp_file"
         fi
     done
 
     return $(( changed == 1 ? 0 : 1 ))
 }
 
+has_active_bullseye_backports() {
+    local source_file
+
+    if grep -RqsE '^[[:space:]]*deb([[:space:]]+\[[^]]+\])?[[:space:]]+[^#[:space:]]+[[:space:]]+bullseye-backports([[:space:]]|$)' \
+        /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null; then
+        return 0
+    fi
+
+    while IFS= read -r -d '' source_file; do
+        if awk '
+            BEGIN { RS="" }
+            {
+                enabled = 1
+                has_suite = 0
+                count = split($0, line, "\n")
+                for (i = 1; i <= count; i++) {
+                    if (line[i] ~ /^[[:space:]]*Enabled:[[:space:]]*no([[:space:]]|$)/) {
+                        enabled = 0
+                    }
+                    if (line[i] ~ /^[[:space:]]*Suites:.*(^|[[:space:]])bullseye-backports([[:space:]]|$)/) {
+                        has_suite = 1
+                    }
+                }
+                if (enabled && has_suite) {
+                    exit 10
+                }
+            }
+        ' "$source_file"; then
+            :
+        elif [[ $? -eq 10 ]]; then
+            return 0
+        fi
+    done < <(find /etc/apt/sources.list.d -maxdepth 1 -type f -name '*.sources' -print0 2>/dev/null)
+
+    return 1
+}
+
 update_package_index() {
     if command_exists apt-get; then
-        if ! apt-get update; then
-            if disable_eol_bullseye_backports; then
-                warn "正在禁用失效源后重试 APT 更新..."
-                apt-get update || {
-                    error "APT 软件源更新仍然失败，安装已停止。"
-                    return 1
-                }
-            else
-                error "APT 软件源更新失败，且未发现可自动修复的 bullseye-backports。"
+        if has_active_bullseye_backports; then
+            warn "检测到已停止服务的 bullseye-backports，正在自动禁用..."
+            disable_eol_bullseye_backports || {
+                error "bullseye-backports 自动禁用失败。"
+                return 1
+            }
+            if has_active_bullseye_backports; then
+                error "仍检测到活动的 bullseye-backports，APT 更新已停止。"
                 return 1
             fi
+        fi
+
+        if ! apt-get update; then
+            error "APT 软件源更新失败，安装已停止。"
+            return 1
         fi
     elif command_exists dnf; then
         dnf makecache || {
