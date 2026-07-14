@@ -19,7 +19,7 @@ NC='\033[0m'
 AUTHOR_GITHUB="https://github.com/Taylor000"
 SCRIPT_NAME="一个人的脚本百宝箱"
 SHORTCUT_CMD="tool"
-SCRIPT_VERSION="2.1.6"
+SCRIPT_VERSION="2.1.8"
 MIN_SUPPORTED_VERSION="2.1.4"
 SCRIPT_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool/master/tool.sh"
 USAGE_COUNTER_URL="https://hits.sh/github.com/Taylor000/tool.svg?label=uses&color=blue"
@@ -227,6 +227,24 @@ run_remote_script() {
     return "$status"
 }
 
+run_remote_script_with_input() {
+    local input=$1
+    local url=$2
+    shift 2
+    local script_file
+    script_file=$(mktemp /tmp/tool-script.XXXXXX) || return 1
+
+    if ! download_script "$url" "$script_file"; then
+        rm -f "$script_file"
+        return 1
+    fi
+
+    printf '%s\n' "$input" | bash "$script_file" "$@"
+    local status=${PIPESTATUS[1]}
+    rm -f "$script_file"
+    return "$status"
+}
+
 valid_port() {
     [[ $1 =~ ^[0-9]+$ ]] && (( 10#$1 >= 1 && 10#$1 <= 65535 ))
 }
@@ -414,7 +432,7 @@ show_mini_header() {
 
 # 菜单函数
 show_menu() {
-    clear
+    clear 2>/dev/null || true
     echo -e "${BLUE}==================================================${NC}"
     echo -e "${GREEN}             ${SCRIPT_NAME}                  ${NC}"
     echo -e "${BLUE}     Author: ${YELLOW}${AUTHOR_GITHUB}${NC}"
@@ -433,7 +451,7 @@ show_menu() {
     echo -e "${YELLOW} 10.${NC} 安装 aaPanel 面板 (mzwrt 备份版)"
     echo -e "${YELLOW} 11.${NC} ${RED}aaPanel 官方版入口暂不可用${NC}"
     echo -e "${YELLOW} 12.${NC} 安装 Docker 运行环境"
-    echo -e "${YELLOW} 13.${NC} 安装 Realm 端口转发工具"
+    echo -e "${YELLOW} 13.${NC} 打开 Realm 端口转发管理脚本"
     echo -e "${YELLOW} 14.${NC} 安装 ServerStatus 监控探针"
     echo -e "${YELLOW} 15.${NC} 安装 Komari 监控探针 (Docker版)"
     echo -e "${YELLOW} 16.${NC} 安装 Xray 代理服务 (233boy版)"
@@ -584,7 +602,7 @@ while true; do
             check_installed "bt" "aaPanel 面板" "bt" || { pause_menu; continue; }
             panel_url="https://raw.githubusercontent.com/mzwrt/aapanel-6.8.37-backup/main/install.sh"
             warn "即将安装第三方备份版 aaPanel。"
-            if run_remote_script "$panel_url" &&
+            if run_remote_script_with_input "yes" "$panel_url" -y &&
                 [[ -d /www/server/panel ]] &&
                 command_exists bt; then
                 info "aaPanel 安装完成。管理命令: bt"
@@ -710,11 +728,12 @@ while true; do
             ;;
         16)
             check_installed "xray" "Xray" "xray" || { pause_menu; continue; }
-            if run_remote_script "https://raw.githubusercontent.com/233boy/Xray/main/install.sh"; then
-                if command_exists xray; then
-                    info "Xray 安装完成。管理命令: xray"
-                else
-                    error "安装脚本已结束，但未检测到 xray 管理命令。"
+            xray_status=0
+            run_remote_script "https://raw.githubusercontent.com/233boy/Xray/main/install.sh" || xray_status=$?
+            if command_exists xray; then
+                info "Xray 安装完成。管理命令: xray"
+                if [[ "$xray_status" -ne 0 ]]; then
+                    warn "上游脚本返回非零状态，但已检测到 Xray 已安装。"
                 fi
             else
                 error "Xray 安装脚本下载或执行失败。"
