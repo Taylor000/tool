@@ -3,7 +3,10 @@
 set -o pipefail
 
 # 自动修复 Windows 换行符问题
-sed -i 's/\r$//' "$0" 2>/dev/null
+CURRENT_SCRIPT=$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")
+if [[ -f "$CURRENT_SCRIPT" && -w "$CURRENT_SCRIPT" && ! -L "$0" ]]; then
+    sed -i 's/\r$//' "$CURRENT_SCRIPT" 2>/dev/null
+fi
 
 # 定义颜色
 RED='\033[0;31m'
@@ -131,15 +134,14 @@ check_script_update() {
         fi
     fi
 
-    current_script=$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")
-    if ! install -m 755 "$remote_script" "$current_script"; then
+    if ! install -m 755 "$remote_script" "$CURRENT_SCRIPT"; then
         error "脚本更新失败，当前版本未被替换。"
         rm -f "$remote_script"
         return 0
     fi
     rm -f "$remote_script"
     info "脚本已更新到 ${remote_version}，正在重新启动..."
-    exec "$current_script"
+    exec "$CURRENT_SCRIPT"
 }
 
 install_packages() {
@@ -635,7 +637,7 @@ while true; do
                 pause_menu
                 continue
             fi
-            if docker ps -a --format '{{.Names}}' | grep -q "^${k_name}$"; then
+            if docker ps -a --format '{{.Names}}' | grep -Fxq "$k_name"; then
                 read -r -p "检测到名为 ${k_name} 的容器已存在，是否删除重装？(y/n): " re_k
                 [[ $re_k != [yY] ]] && continue
                 docker rm -f "$k_name" >/dev/null || {
@@ -693,7 +695,7 @@ while true; do
                 pause_menu
                 continue
             fi
-            if docker ps -a --format '{{.Names}}' | grep -q "^${x_name}$"; then
+            if docker ps -a --format '{{.Names}}' | grep -Fxq "$x_name"; then
                 read -r -p "检测到名为 ${x_name} 的容器已存在，是否删除重装？(y/n): " re_x
                 [[ $re_x != [yY] ]] && continue
                 docker rm -f "$x_name" >/dev/null || {
@@ -772,7 +774,7 @@ while true; do
         21)
             read -r -p "确定要删除本脚本及快捷命令吗？(y/n): " del_confirm
             if [[ $del_confirm == [yY] ]]; then
-                rm -f /usr/local/bin/${SHORTCUT_CMD}
+                rm -f "/usr/local/bin/${SHORTCUT_CMD}"
                 echo -e "${GREEN}快捷命令已删除。${NC}"
                 rm -f "$0"
                 echo -e "${GREEN}脚本文件已删除。再见！${NC}"
