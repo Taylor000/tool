@@ -19,7 +19,7 @@ NC='\033[0m'
 AUTHOR_GITHUB="https://github.com/Taylor000"
 SCRIPT_NAME="一个人的脚本百宝箱"
 SHORTCUT_CMD="tool"
-SCRIPT_VERSION="2.1.9"
+SCRIPT_VERSION="2.1.10"
 MIN_SUPPORTED_VERSION="2.1.4"
 SCRIPT_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool/master/tool.sh"
 USAGE_COUNTER_URL="https://hits.sh/github.com/Taylor000/tool.svg?label=uses&color=blue"
@@ -457,7 +457,7 @@ show_menu() {
     echo -e "${YELLOW} 16.${NC} 安装 Xray 代理服务 (233boy版)"
     echo -e "${YELLOW} 17.${NC} 安装 3X-UI 面板 (Docker版)"
     echo -e "${YELLOW} 18.${NC} ${RED}XrayR 官方版 (项目已废弃)${NC}"
-    echo -e "${YELLOW} 19.${NC} 安装 XrayR 后端对接 (柚子备份版)"
+    echo -e "${YELLOW} 19.${NC} 安装 XrayR 后端对接 (柚子备份版，需配置)"
     echo -e "${YELLOW} 20.${NC} 安装 v2node 后端对接 (官方版)"
     echo -e "${BLUE}--------------------------------------------------${NC}"
     echo -e "${YELLOW} 21.${NC} ${RED}卸载并删除本脚本${NC}"
@@ -802,6 +802,11 @@ while true; do
             if run_remote_script "https://raw.githubusercontent.com/youzi3/XrayR-script/main/install.sh"; then
                 if command_exists xrayr || command_exists XrayR; then
                     info "XrayR 柚子版安装完成。管理命令: xrayr"
+                    if [[ -f /etc/XrayR/config.yml ]]; then
+                        warn "请先编辑 /etc/XrayR/config.yml 填写面板地址、节点 ID 和通讯密钥，然后执行: xrayr restart"
+                    else
+                        warn "未检测到 /etc/XrayR/config.yml，请执行 xrayr install 或重新运行本菜单。"
+                    fi
                 else
                     error "安装脚本已结束，但未检测到 XrayR 管理命令。"
                 fi
