@@ -19,7 +19,7 @@ NC='\033[0m'
 AUTHOR_GITHUB="https://github.com/Taylor000"
 SCRIPT_NAME="一个人的脚本百宝箱"
 SHORTCUT_CMD="tool"
-SCRIPT_VERSION="2.1.5"
+SCRIPT_VERSION="2.1.6"
 MIN_SUPPORTED_VERSION="2.1.4"
 SCRIPT_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool/master/tool.sh"
 USAGE_COUNTER_URL="https://hits.sh/github.com/Taylor000/tool.svg?label=uses&color=blue"
@@ -302,6 +302,23 @@ check_base_dependencies() {
     fi
 }
 
+check_dd_dependencies() {
+    warn "正在检查 DD/重装系统所需依赖..."
+
+    if command_exists apt-get; then
+        install_packages wget openssl xz-utils gzip cpio file util-linux ca-certificates iproute2 || return 1
+    elif command_exists dnf; then
+        install_packages wget openssl xz gzip cpio file util-linux ca-certificates iproute || return 1
+    elif command_exists yum; then
+        install_packages wget openssl xz gzip cpio file util-linux ca-certificates iproute || return 1
+    elif command_exists apk; then
+        install_packages wget openssl xz gzip cpio file util-linux ca-certificates iproute2 || return 1
+    else
+        error "无法识别包管理器，请手动安装 wget openssl xz gzip cpio file lsblk ip 后再运行 DD 功能。"
+        return 1
+    fi
+}
+
 # 获取系统基本网络信息
 get_network_info() {
     LOCAL_IP=$(curl --fail --silent --show-error --ipv4 --max-time 10 https://api64.ipify.org \
@@ -523,6 +540,11 @@ while true; do
             warn "警告：重装系统会清空当前服务器数据。"
             read -r -p "确认重装 Debian $ver？请输入 YES 继续: " reinstall_confirm
             [[ $reinstall_confirm == "YES" ]] || continue
+            check_dd_dependencies || {
+                error "DD 依赖安装失败，已取消重装。"
+                pause_menu
+                continue
+            }
             read -r -p "设置 Debian $ver 密码 (默认 $DEFAULT_PASS): " dd_pass
             dd_pass=${dd_pass:-$DEFAULT_PASS}
             run_remote_script "https://raw.githubusercontent.com/veip007/dd/master/InstallNET.sh" \
@@ -533,10 +555,15 @@ while true; do
             warn "警告：重装系统会清空当前服务器数据。"
             read -r -p "确认重装 Windows 10 LTSC？请输入 YES 继续: " reinstall_confirm
             [[ $reinstall_confirm == "YES" ]] || continue
+            check_dd_dependencies || {
+                error "DD 依赖安装失败，已取消重装。"
+                pause_menu
+                continue
+            }
             read -r -p "设置 Win10 密码 (默认 $DEFAULT_PASS): " win_pass
             win_pass=${win_pass:-$DEFAULT_PASS}
             run_remote_script "https://raw.githubusercontent.com/minlearn/inst/master/inst.sh" \
-                -o "pass:$win_pass" \
+                -w "$win_pass" \
                 -t "https://dl.lamp.sh/vhd/zh-cn_windows10_ltsc.xz" ||
                 error "Windows 10 LTSC 重装脚本下载或执行失败。"
             ;;
@@ -544,6 +571,11 @@ while true; do
             warn "警告：重装系统会清空当前服务器数据。"
             read -r -p "确认打开 veip007 Windows DD 交互脚本？请输入 YES 继续: " reinstall_confirm
             [[ $reinstall_confirm == "YES" ]] || continue
+            check_dd_dependencies || {
+                error "DD 依赖安装失败，已取消重装。"
+                pause_menu
+                continue
+            }
             warn "请在上游交互菜单中选择 Windows 镜像并确认其默认密码。"
             run_remote_script "https://raw.githubusercontent.com/veip007/dd/master/dd-od.sh" ||
                 error "veip007 Windows DD 脚本下载或执行失败。"
