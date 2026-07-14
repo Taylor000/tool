@@ -19,7 +19,7 @@ NC='\033[0m'
 AUTHOR_GITHUB="https://github.com/Taylor000"
 SCRIPT_NAME="一个人的脚本百宝箱"
 SHORTCUT_CMD="tool"
-SCRIPT_VERSION="2.1.8"
+SCRIPT_VERSION="2.1.9"
 MIN_SUPPORTED_VERSION="2.1.4"
 SCRIPT_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool/master/tool.sh"
 USAGE_COUNTER_URL="https://hits.sh/github.com/Taylor000/tool.svg?label=uses&color=blue"
@@ -812,13 +812,29 @@ while true; do
             ;;
         20)
             check_installed "v2node" "v2node" "v2node" || { pause_menu; continue; }
-            if run_remote_script "https://raw.githubusercontent.com/wyx2685/v2node/master/script/install.sh"; then
+            read -r -p "面板 API 地址 (例如 https://example.com/，留空则只安装程序): " v2_api_host
+            read -r -p "节点 ID (留空则只安装程序): " v2_node_id
+            read -r -p "节点通讯密钥 (留空则只安装程序): " v2_api_key
+
+            v2_args=()
+            if [[ -n "$v2_api_host" || -n "$v2_node_id" || -n "$v2_api_key" ]]; then
+                if [[ -z "$v2_api_host" || -z "$v2_node_id" || -z "$v2_api_key" || ! "$v2_node_id" =~ ^[0-9]+$ ]]; then
+                    error "v2node 配置参数不完整或节点 ID 非数字，已取消安装。"
+                    pause_menu
+                    continue
+                fi
+                v2_args=(--api-host "$v2_api_host" --node-id "$v2_node_id" --api-key "$v2_api_key")
+            fi
+
+            if run_remote_script "https://raw.githubusercontent.com/wyx2685/v2node/master/script/install.sh" "${v2_args[@]}"; then
                 if command_exists v2node; then
                     info "v2node 安装完成。管理命令: v2node"
-                    if command_exists systemctl && systemctl is-active --quiet v2node; then
+                    if [[ ! -f /etc/v2node/config.json ]]; then
+                        warn "v2node 已安装，但尚未生成 /etc/v2node/config.json；请执行 v2node generate 或重新运行本菜单填写面板参数。"
+                    elif command_exists systemctl && systemctl is-active --quiet v2node; then
                         info "v2node 服务正在运行。"
                     else
-                        warn "v2node 已安装但服务尚未运行，请配置后执行: v2node start"
+                        warn "v2node 配置文件已存在，但服务尚未运行，请检查配置后执行: v2node start"
                     fi
                 else
                     error "安装脚本已结束，但未检测到 v2node 管理命令。"
