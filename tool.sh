@@ -94,7 +94,7 @@ record_usage_count() {
 }
 
 check_script_update() {
-    local remote_script remote_version remote_min_version current_script answer force_update=0
+    local remote_script remote_version remote_min_version answer force_update=0
 
     remote_script=$(mktemp /tmp/tool-update.XXXXXX) || return 0
     if ! download_script "${SCRIPT_RAW_URL}?t=$(date +%s)" "$remote_script"; then
@@ -169,7 +169,7 @@ download_file() {
     rm -f "$destination"
     if command_exists curl; then
         curl --fail --location --silent --show-error \
-            --connect-timeout 15 --retry 2 \
+            --connect-timeout 15 --max-time 60 --retry 2 \
             "$url" -o "$destination"
         status=$?
     elif command_exists wget; then
@@ -269,8 +269,13 @@ wait_for_container() {
 # 基础依赖检测与安装
 check_base_dependencies() {
     local missing=()
-    command_exists curl || missing+=(curl)
-    command_exists wget || missing+=(wget)
+    if ! command_exists curl && ! command_exists wget; then
+        missing+=(curl)
+    fi
+
+    if command_exists apt-get; then
+        command_exists update-ca-certificates || missing+=(ca-certificates)
+    fi
 
     if (( ${#missing[@]} > 0 )); then
         warn "正在安装基础依赖：${missing[*]}"
@@ -409,7 +414,7 @@ show_menu() {
     echo -e "${YELLOW} 8.${NC} 安装 Win10 LTSC 系统 (秋水逸冰)"
     echo -e "${YELLOW} 9.${NC} 安装 Windows 系统 (veip007 交互版)"
     echo -e "${YELLOW} 10.${NC} 安装 aaPanel 面板 (mzwrt 备份版)"
-    echo -e "${YELLOW} 11.${NC} 安装 aaPanel 面板 (官方正式版)"
+    echo -e "${YELLOW} 11.${NC} ${RED}aaPanel 官方版入口暂不可用${NC}"
     echo -e "${YELLOW} 12.${NC} 安装 Docker 运行环境"
     echo -e "${YELLOW} 13.${NC} 安装 Realm 端口转发工具"
     echo -e "${YELLOW} 14.${NC} 安装 ServerStatus 监控探针"
@@ -543,14 +548,10 @@ while true; do
             run_remote_script "https://raw.githubusercontent.com/veip007/dd/master/dd-od.sh" ||
                 error "veip007 Windows DD 脚本下载或执行失败。"
             ;;
-        10 | 11)
+        10)
             check_installed "bt" "aaPanel 面板" "bt" || { pause_menu; continue; }
-            if [[ $choice == 10 ]]; then
-                panel_url="https://raw.githubusercontent.com/mzwrt/aapanel-6.8.37-backup/main/install.sh"
-                warn "即将安装第三方备份版 aaPanel。"
-            else
-                panel_url="https://www.aapanel.com/script/install_panel_en.sh"
-            fi
+            panel_url="https://raw.githubusercontent.com/mzwrt/aapanel-6.8.37-backup/main/install.sh"
+            warn "即将安装第三方备份版 aaPanel。"
             if run_remote_script "$panel_url" &&
                 [[ -d /www/server/panel ]] &&
                 command_exists bt; then
@@ -560,6 +561,11 @@ while true; do
                 error "aaPanel 安装失败；如果官方地址处于维护状态，请稍后重试。"
             fi
             show_mini_header
+            ;;
+        11)
+            error "aaPanel 官方安装脚本当前不可用：官方历史入口 install_panel_en.sh / install_7.0_en.sh 返回 404 或证书校验失败。"
+            warn "如需安装 aaPanel，请先使用菜单 10 的 mzwrt 备份版，或手动从 aaPanel 官网获取最新安装命令后再执行。"
+            pause_menu
             ;;
         12)
             check_installed "docker" "Docker" "docker ps" || { pause_menu; continue; }
