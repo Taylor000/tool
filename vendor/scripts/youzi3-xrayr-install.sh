@@ -4,6 +4,7 @@ red='\033[0;31m'
 green='\033[0;32m'
 yellow='\033[0;33m'
 plain='\033[0m'
+vendor_release_url="https://github.com/Taylor000/tool/releases/latest/download"
 
 cur_dir=$(pwd)
 
@@ -109,28 +110,20 @@ install_XrayR() {
 	cd /usr/local/XrayR/
 
     if  [ $# == 0 ] ;then
-        last_version=$(curl -Ls "https://api.github.com/repos/youzi3/XrayR/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-        if [[ ! -n "$last_version" ]]; then
-            echo -e "${red}检测 XrayR 版本失败，可能是超出 Github API 限制，请稍后再试，或手动指定 XrayR 版本安装${plain}"
-            exit 1
-        fi
-        echo -e "检测到 XrayR 最新版本：${last_version}，开始安装"
-        wget -q -N --no-check-certificate -O /usr/local/XrayR/XrayR-linux.zip https://github.com/youzi3/XrayR/releases/download/${last_version}/XrayR-linux-${arch}.zip
+        last_version="Taylor000/tool latest"
+        echo -e "使用 Taylor000/tool latest release 中的 XrayR，开始安装"
+        wget -q -N --no-check-certificate -O /usr/local/XrayR/XrayR-linux.zip ${vendor_release_url}/XrayR-linux-${arch}.zip
         if [[ $? -ne 0 ]]; then
-            echo -e "${red}下载 XrayR 失败，请确保你的服务器能够下载 Github 的文件${plain}"
+            echo -e "${red}下载 XrayR 失败，请确保 Taylor000/tool latest release 已上传 XrayR-linux-${arch}.zip${plain}"
             exit 1
         fi
     else
-        if [[ $1 == v* ]]; then
-            last_version=$1
-	else
-	    last_version="v"$1
-	fi
-        url="https://github.com/youzi3/XrayR/releases/download/${last_version}/XrayR-linux-${arch}.zip"
-        echo -e "开始安装 XrayR ${last_version}"
+        last_version="$1"
+        url="${vendor_release_url}/XrayR-linux-${arch}.zip"
+        echo -e "开始安装 Taylor000/tool latest release 中的 XrayR (${last_version})"
         wget -q -N --no-check-certificate -O /usr/local/XrayR/XrayR-linux.zip ${url}
         if [[ $? -ne 0 ]]; then
-            echo -e "${red}下载 XrayR ${last_version} 失败，请确保此版本存在${plain}"
+            echo -e "${red}下载 XrayR 失败，请确保 Taylor000/tool latest release 已上传 XrayR-linux-${arch}.zip${plain}"
             exit 1
         fi
     fi

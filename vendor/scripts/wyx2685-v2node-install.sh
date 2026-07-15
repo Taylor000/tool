@@ -4,6 +4,7 @@ red='\033[0;31m'
 green='\033[0;32m'
 yellow='\033[0;33m'
 plain='\033[0m'
+vendor_release_url="https://github.com/Taylor000/tool/releases/latest/download"
 
 cur_dir=$(pwd)
 
@@ -267,24 +268,20 @@ install_v2node() {
     cd /usr/local/v2node/
 
     if  [[ -z "$version_param" ]] ; then
-        last_version=$(curl -Ls "https://api.github.com/repos/wyx2685/v2node/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-        if [[ ! -n "$last_version" ]]; then
-            echo -e "${red}检测 v2node 版本失败，可能是超出 Github API 限制，请稍后再试，或手动指定 v2node 版本安装${plain}"
-            exit 1
-        fi
-        echo -e "${green}检测到最新版本：${last_version}，开始安装...${plain}"
-        url="https://github.com/wyx2685/v2node/releases/download/${last_version}/v2node-linux-${arch}.zip"
+        last_version="Taylor000/tool latest"
+        echo -e "${green}使用 Taylor000/tool latest release 中的 v2node，开始安装...${plain}"
+        url="${vendor_release_url}/v2node-linux-${arch}.zip"
         curl -sL "$url" | pv -s 30M -W -N "下载进度" > /usr/local/v2node/v2node-linux.zip
         if [[ $? -ne 0 ]]; then
-            echo -e "${red}下载 v2node 失败，请确保你的服务器能够下载 Github 的文件${plain}"
+            echo -e "${red}下载 v2node 失败，请确保 Taylor000/tool latest release 已上传 v2node-linux-${arch}.zip${plain}"
             exit 1
         fi
     else
     last_version=$version_param
-        url="https://github.com/wyx2685/v2node/releases/download/${last_version}/v2node-linux-${arch}.zip"
+        url="${vendor_release_url}/v2node-linux-${arch}.zip"
         curl -sL "$url" | pv -s 30M -W -N "下载进度" > /usr/local/v2node/v2node-linux.zip
         if [[ $? -ne 0 ]]; then
-            echo -e "${red}下载 v2node $1 失败，请确保此版本存在${plain}"
+            echo -e "${red}下载 v2node 失败，请确保 Taylor000/tool latest release 已上传 v2node-linux-${arch}.zip${plain}"
             exit 1
         fi
     fi

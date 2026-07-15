@@ -36,6 +36,7 @@ fi
 cd ~
 setup_path="/www"
 python_bin=$setup_path/server/panel/pyenv/bin/python
+vendor_release_url="https://github.com/Taylor000/tool/releases/latest/download"
 cpu_cpunt=$(cat /proc/cpuinfo | grep processor | wc -l)
 panelPort=$(expr $RANDOM % 55535 + 10000)
 if [ "$1" ]; then
@@ -530,11 +531,11 @@ Install_Python_Lib() {
     if [ "${os_version}" != "" ]; then
         pyenv_file="/www/pyenv.tar.gz"
         #wget --no-check-certificate -O $pyenv_file $download_Url/install/pyenv/pyenv-${os_type}${os_version}-x${is64bit}.tar.gz -T 15
-	wget --no-check-certificate -O $pyenv_file https://github.com/mzwrt/aapanel-6.8.37-backup/releases/download/pyenv/pyenv-${os_type}${os_version}-x${is64bit}.tar.gz -T 15
+	wget --no-check-certificate -O $pyenv_file ${vendor_release_url}/pyenv-${os_type}${os_version}-x${is64bit}.tar.gz -T 15
         if [ "$?" != "0" ];then
             get_node_url $download_Url
             #wget --no-check-certificate -O $pyenv_file $download_Url/install/pyenv/pyenv-${os_type}${os_version}-x${is64bit}.tar.gz -T 15
-            wget --no-check-certificate -O $pyenv_file https://github.com/mzwrt/aapanel-6.8.37-backup/releases/download/pyenv/pyenv-${os_type}${os_version}-x${is64bit}.tar.gz -T 15
+            wget --no-check-certificate -O $pyenv_file ${vendor_release_url}/pyenv-${os_type}${os_version}-x${is64bit}.tar.gz -T 15
         fi
         tmp_size=$(du -b $pyenv_file | awk '{print $1}')
         if [ $tmp_size -lt 703460 ]; then
@@ -566,7 +567,7 @@ Install_Python_Lib() {
     python_src='/www/python_src.tar.xz'
     python_src_path="/www/Python-${py_version}"
     #wget --no-check-certificate -O $python_src $download_Url/src/Python-${py_version}.tar.xz -T 15
-    wget --no-check-certificate -O $python_src https://github.com/mzwrt/aapanel-6.8.37-backup/releases/download/python/Python-${py_version}.tar.xz -T 15
+    wget --no-check-certificate -O $python_src ${vendor_release_url}/Python-${py_version}.tar.xz -T 15
     tmp_size=$(du -b $python_src | awk '{print $1}')
     if [ $tmp_size -lt 10703460 ]; then
         rm -f $python_src

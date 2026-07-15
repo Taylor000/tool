@@ -13,6 +13,7 @@
 # --- 基础配置 ---
 sh_ver="3.2.6"
 panel_ver="v3.2.6"
+VENDOR_RELEASE_URL="https://github.com/Taylor000/tool/releases/latest/download"
 
 # 颜色定义
 RED="\033[31m"
@@ -413,8 +414,7 @@ EOF
 install_realm() {
     echo -e "${GREEN}> 部署 Realm...${PLAIN}"
     check_dependencies; init_env
-    local version=$(curl -s https://api.github.com/repos/zhboner/realm/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-    [ -z "$version" ] && version="v2.6.0"
+    local version="Taylor000/tool latest"
 
     local arch=$(uname -m)
     local filename
@@ -423,7 +423,7 @@ install_realm() {
         return 1
     fi
 
-    wget -O "/tmp/realm.tar.gz" "https://github.com/zhboner/realm/releases/download/${version}/${filename}" || { echo -e "${RED}下载失败${PLAIN}"; return 1; }
+    wget -O "/tmp/realm.tar.gz" "${VENDOR_RELEASE_URL}/${filename}" || { echo -e "${RED}下载失败，请确认 Taylor000/tool latest release 已上传 ${filename}${PLAIN}"; return 1; }
     tar -xvf /tmp/realm.tar.gz -C "$REALM_DIR" && rm -f /tmp/realm.tar.gz
     chmod +x "$REALM_BIN"
 
@@ -614,7 +614,7 @@ install_panel() {
     esac
 
     mkdir -p "$PANEL_DIR"
-    local url="https://github.com/wcwq98/realm/releases/download/${panel_ver}/${p_file}"
+    local url="${VENDOR_RELEASE_URL}/${p_file}"
     local tmp_zip="/tmp/${p_file}"
     local tmp_dir="/tmp/realm_panel_$$"
 
