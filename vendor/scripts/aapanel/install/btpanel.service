@@ -5,7 +5,8 @@ After=network-online.target remote-fs.target nss-lookup.target
 Wants=network-online.target
 
 [Service]
-Type=forking
+Type=oneshot
+RemainAfterExit=yes
 ExecStart=/etc/init.d/bt start
 ExecReload=/etc/init.d/bt reload
 ExecStop=/etc/init.d/bt stop
