@@ -19,9 +19,10 @@ NC='\033[0m'
 AUTHOR_GITHUB="https://github.com/Taylor000"
 SCRIPT_NAME="一个人的脚本百宝箱"
 SHORTCUT_CMD="tool"
-SCRIPT_VERSION="2.1.10"
+SCRIPT_VERSION="2.1.11"
 MIN_SUPPORTED_VERSION="2.1.4"
 SCRIPT_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool/master/tool.sh"
+VENDOR_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool/master/vendor"
 USAGE_COUNTER_URL="https://hits.sh/github.com/Taylor000/tool.svg?label=uses&color=blue"
 
 # 默认全局配置
@@ -374,7 +375,7 @@ enable_bbr() {
     fi
 
     bbr_script=$(mktemp /tmp/tool-bbr.XXXXXX) || return 1
-    download_script "https://raw.githubusercontent.com/teddysun/across/master/bbr.sh" "$bbr_script" &&
+    download_script "${VENDOR_RAW_URL}/scripts/teddysun-bbr.sh" "$bbr_script" &&
         bash "$bbr_script"
     local status=$?
     rm -f "$bbr_script"
@@ -385,7 +386,7 @@ enable_bbr() {
 check_docker() {
     if ! command_exists docker; then
         warn "检测到系统未安装 Docker，正在开始自动安装..."
-        run_remote_script "https://get.docker.com" || {
+        run_remote_script "${VENDOR_RAW_URL}/scripts/docker-get.sh" || {
             error "Docker 安装脚本执行失败。"
             return 1
         }
@@ -484,7 +485,7 @@ while true; do
 
     case $choice in
         1)
-            run_remote_script "https://bench.sh" || error "系统测试脚本执行失败。"
+            run_remote_script "${VENDOR_RAW_URL}/scripts/bench.sh" || error "系统测试脚本执行失败。"
             pause_menu
             ;;
         2)
@@ -565,7 +566,7 @@ while true; do
             }
             read -r -p "设置 Debian $ver 密码 (默认 $DEFAULT_PASS): " dd_pass
             dd_pass=${dd_pass:-$DEFAULT_PASS}
-            run_remote_script "https://raw.githubusercontent.com/veip007/dd/master/InstallNET.sh" \
+            run_remote_script "${VENDOR_RAW_URL}/scripts/veip007-InstallNET.sh" \
                 -d "$ver" -v 64 -a -p "$dd_pass" ||
                 error "Debian $ver 重装脚本下载或执行失败。"
             ;;
@@ -580,7 +581,7 @@ while true; do
             }
             read -r -p "设置 Win10 密码 (默认 $DEFAULT_PASS): " win_pass
             win_pass=${win_pass:-$DEFAULT_PASS}
-            run_remote_script "https://raw.githubusercontent.com/minlearn/inst/master/inst.sh" \
+            run_remote_script "${VENDOR_RAW_URL}/scripts/minlearn-inst.sh" \
                 -w "$win_pass" \
                 -t "https://dl.lamp.sh/vhd/zh-cn_windows10_ltsc.xz" ||
                 error "Windows 10 LTSC 重装脚本下载或执行失败。"
@@ -595,12 +596,12 @@ while true; do
                 continue
             }
             warn "请在上游交互菜单中选择 Windows 镜像并确认其默认密码。"
-            run_remote_script "https://raw.githubusercontent.com/veip007/dd/master/dd-od.sh" ||
+            run_remote_script "${VENDOR_RAW_URL}/scripts/veip007-dd-od.sh" ||
                 error "veip007 Windows DD 脚本下载或执行失败。"
             ;;
         10)
             check_installed "bt" "aaPanel 面板" "bt" || { pause_menu; continue; }
-            panel_url="https://raw.githubusercontent.com/mzwrt/aapanel-6.8.37-backup/main/install.sh"
+            panel_url="${VENDOR_RAW_URL}/scripts/mzwrt-aapanel-install.sh"
             warn "即将安装第三方备份版 aaPanel。"
             if run_remote_script_with_input "yes" "$panel_url" -y &&
                 [[ -d /www/server/panel ]] &&
@@ -626,7 +627,7 @@ while true; do
             ;;
         13)
             check_installed "realm" "Realm" "realm" || { pause_menu; continue; }
-            run_remote_script "https://raw.githubusercontent.com/wcwq98/realm/refs/heads/main/realm.sh" ||
+            run_remote_script "${VENDOR_RAW_URL}/scripts/wcwq98-realm.sh" ||
                 error "Realm 安装脚本下载或执行失败。"
             ;;
         14)
@@ -648,7 +649,7 @@ while true; do
                 continue
             fi
             if ! download_file \
-                "https://raw.githubusercontent.com/cppla/ServerStatus/master/server/config.json" \
+                "${VENDOR_RAW_URL}/configs/serverstatus-config.json" \
                 "$HOME/serverstatus-config.json"; then
                 pause_menu
                 continue
@@ -729,7 +730,7 @@ while true; do
         16)
             check_installed "xray" "Xray" "xray" || { pause_menu; continue; }
             xray_status=0
-            run_remote_script "https://raw.githubusercontent.com/233boy/Xray/main/install.sh" || xray_status=$?
+            run_remote_script "${VENDOR_RAW_URL}/scripts/233boy-xray-install.sh" || xray_status=$?
             if command_exists xray; then
                 info "Xray 安装完成。管理命令: xray"
                 if [[ "$xray_status" -ne 0 ]]; then
@@ -799,7 +800,7 @@ while true; do
             ;;
         19)
             check_installed "xrayr" "XrayR 柚子" "xrayr" || { pause_menu; continue; }
-            if run_remote_script "https://raw.githubusercontent.com/youzi3/XrayR-script/main/install.sh"; then
+            if run_remote_script "${VENDOR_RAW_URL}/scripts/youzi3-xrayr-install.sh"; then
                 if command_exists xrayr || command_exists XrayR; then
                     info "XrayR 柚子版安装完成。管理命令: xrayr"
                     if [[ -f /etc/XrayR/config.yml ]]; then
@@ -831,7 +832,7 @@ while true; do
                 v2_args=(--api-host "$v2_api_host" --node-id "$v2_node_id" --api-key "$v2_api_key")
             fi
 
-            if run_remote_script "https://raw.githubusercontent.com/wyx2685/v2node/master/script/install.sh" "${v2_args[@]}"; then
+            if run_remote_script "${VENDOR_RAW_URL}/scripts/wyx2685-v2node-install.sh" "${v2_args[@]}"; then
                 if command_exists v2node; then
                     info "v2node 安装完成。管理命令: v2node"
                     if [[ ! -f /etc/v2node/config.json ]]; then
