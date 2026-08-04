@@ -19,7 +19,7 @@ NC='\033[0m'
 AUTHOR_GITHUB="https://github.com/Taylor000"
 SCRIPT_NAME="一个人的脚本百宝箱"
 SHORTCUT_CMD="tool"
-SCRIPT_VERSION="2.1.11"
+SCRIPT_VERSION="2.1.12"
 MIN_SUPPORTED_VERSION="2.1.4"
 SCRIPT_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool/master/tool.sh"
 VENDOR_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool/master/vendor"
@@ -30,6 +30,7 @@ DEFAULT_PORT="11156"
 DEFAULT_PASS="github.taylor000"
 BIND_IP="127.0.0.1"
 PUBLIC_BIND_IP="0.0.0.0"
+APT_INDEX_REFRESHED=0
 
 # 检查是否为 Root
 [[ $EUID -ne 0 ]] && echo -e "${RED}错误：请使用 root 用户运行此脚本！${NC}" && exit 1
@@ -149,6 +150,14 @@ install_packages() {
     (( $# > 0 )) || return 0
 
     if command_exists apt-get; then
+        if (( APT_INDEX_REFRESHED == 0 )); then
+            warn "正在刷新 APT 软件包索引..."
+            if DEBIAN_FRONTEND=noninteractive apt-get update; then
+                APT_INDEX_REFRESHED=1
+            else
+                warn "APT 软件包索引刷新未完全成功，将尝试使用现有索引继续安装。"
+            fi
+        fi
         DEBIAN_FRONTEND=noninteractive apt-get install -y "$@"
     elif command_exists dnf; then
         dnf install -y "$@"
@@ -530,17 +539,10 @@ while true; do
         5)
             check_installed "iperf3" "iperf3 测速工具" "iperf3" || { pause_menu; continue; }
             install_status=1
-            if command_exists apt-get; then
-                DEBIAN_FRONTEND=noninteractive apt-get install -y iperf3 &&
-                    install_status=0
-            elif command_exists dnf; then
-                dnf install -y iperf3 && install_status=0
-            elif command_exists yum; then
-                yum install -y epel-release &&
-                    yum install -y iperf3 &&
-                    install_status=0
-            elif command_exists apk; then
-                apk add --no-cache iperf3 && install_status=0
+            if command_exists yum && ! command_exists dnf; then
+                yum install -y epel-release && install_packages iperf3 && install_status=0
+            elif command_exists apt-get || command_exists dnf || command_exists apk; then
+                install_packages iperf3 && install_status=0
             else
                 error "不支持当前系统的包管理器。"
             fi
