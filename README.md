@@ -32,7 +32,7 @@ $ tool
 11. 安装 Docker 运行环境
 12. 安装 ServerStatus 监控探针
 13. 安装 Komari 监控探针（Docker 版）
-14. XrayR 官方版（项目已废弃）
+14. 安装 XrayR 官方版（v0.9.4，已停止维护）
 15. 安装 XrayR 后端对接（柚子备份版，需配置）
 16. 安装 v2node 后端对接（官方版）
 --------------------------------------------------
@@ -50,4 +50,3 @@ curl -fsSL https://raw.githubusercontent.com/Taylor000/tool/master/tool.sh -o /u
 chmod +x /usr/local/bin/tool
 tool
 ```
-

@@ -6,6 +6,52 @@ yellow='\033[0;33m'
 plain='\033[0m'
 
 version="v1.0.0"
+tool_raw_url="https://raw.githubusercontent.com/Taylor000/tool/master/vendor/scripts"
+install_source_file="/etc/XrayR/install-source"
+
+get_install_source() {
+    if [[ -f "$install_source_file" ]] && [[ $(<"$install_source_file") == "official" ]]; then
+        echo "official"
+    else
+        echo "backup"
+    fi
+}
+
+get_installer_url() {
+    if [[ $(get_install_source) == "official" ]]; then
+        echo "${tool_raw_url}/xrayr-official-install.sh"
+    else
+        echo "${tool_raw_url}/youzi3-xrayr-install.sh"
+    fi
+}
+
+run_installer() {
+    local installer_url installer_file status
+
+    installer_url=$(get_installer_url)
+    installer_file=$(mktemp /tmp/xrayr-installer.XXXXXX) || return 1
+    if command -v curl >/dev/null 2>&1; then
+        curl --fail --location --silent --show-error --max-time 120 \
+            "$installer_url" -o "$installer_file"
+    elif command -v wget >/dev/null 2>&1; then
+        wget --https-only --quiet --timeout=120 -O "$installer_file" "$installer_url"
+    else
+        echo -e "${red}系统缺少 curl 或 wget，无法下载安装脚本。${plain}"
+        rm -f "$installer_file"
+        return 1
+    fi
+    status=$?
+    if (( status != 0 )) || [[ ! -s "$installer_file" ]] || ! bash -n "$installer_file"; then
+        echo -e "${red}XrayR 安装脚本下载失败或语法无效。${plain}"
+        rm -f "$installer_file"
+        return 1
+    fi
+
+    bash "$installer_file" "$@"
+    status=$?
+    rm -f "$installer_file"
+    return "$status"
+}
 
 # check root
 [[ $EUID -ne 0 ]] && echo -e "${red}错误: ${plain} 必须使用root用户运行此脚本！\n" && exit 1
@@ -84,7 +130,7 @@ before_show_menu() {
 }
 
 install() {
-    bash <(curl -Ls https://raw.githubusercontent.com/Taylor000/tool/master/vendor/scripts/youzi3-xrayr-install.sh)
+    run_installer
     if [[ $? == 0 ]]; then
         if [[ $# == 0 ]]; then
             start
@@ -108,7 +154,11 @@ update() {
 #        fi
 #        return 0
 #    fi
-    bash <(curl -Ls https://raw.githubusercontent.com/Taylor000/tool/master/vendor/scripts/youzi3-xrayr-install.sh) $version
+    if [[ -n "$version" ]]; then
+        run_installer "$version"
+    else
+        run_installer
+    fi
     if [[ $? == 0 ]]; then
         echo -e "${green}更新完成，已自动重启 XrayR，请使用 XrayR log 查看运行日志${plain}"
         exit
@@ -351,7 +401,11 @@ show_enable_status() {
 
 show_XrayR_version() {
     echo -n "XrayR 版本："
-    /usr/local/XrayR/XrayR -version
+    if [[ $(get_install_source) == "official" ]]; then
+        /usr/local/XrayR/XrayR version
+    else
+        /usr/local/XrayR/XrayR -version
+    fi
     echo ""
     if [[ $# == 0 ]]; then
         before_show_menu
@@ -378,9 +432,15 @@ show_usage() {
 }
 
 show_menu() {
+    local project_url
+    if [[ $(get_install_source) == "official" ]]; then
+        project_url="https://github.com/XrayR-project/XrayR (已停止维护)"
+    else
+        project_url="https://github.com/youzi3/XrayR"
+    fi
     echo -e "
   ${green}XrayR 后端管理脚本，${plain}${red}不适用于docker${plain}
---- https://github.com/youzi3/XrayR ---
+--- ${project_url} ---
   ${green}0.${plain} 修改配置
 ————————————————
   ${green}1.${plain} 安装 XrayR

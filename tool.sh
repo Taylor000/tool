@@ -19,7 +19,7 @@ NC='\033[0m'
 AUTHOR_GITHUB="https://github.com/Taylor000"
 SCRIPT_NAME="一个人的脚本百宝箱"
 SHORTCUT_CMD="tool"
-SCRIPT_VERSION="2.1.13"
+SCRIPT_VERSION="2.1.14"
 MIN_SUPPORTED_VERSION="2.1.4"
 SCRIPT_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool/master/tool.sh"
 VENDOR_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool/master/vendor"
@@ -462,7 +462,7 @@ show_menu() {
     echo -e "${YELLOW} 11.${NC} 安装 Docker 运行环境"
     echo -e "${YELLOW} 12.${NC} 安装 ServerStatus 监控探针"
     echo -e "${YELLOW} 13.${NC} 安装 Komari 监控探针 (Docker版)"
-    echo -e "${YELLOW} 14.${NC} ${RED}XrayR 官方版 (项目已废弃)${NC}"
+    echo -e "${YELLOW} 14.${NC} 安装 XrayR 官方版 (v0.9.4，已停止维护)"
     echo -e "${YELLOW} 15.${NC} 安装 XrayR 后端对接 (柚子备份版，需配置)"
     echo -e "${YELLOW} 16.${NC} 安装 v2node 后端对接 (官方版)"
     echo -e "${BLUE}--------------------------------------------------${NC}"
@@ -716,9 +716,24 @@ while true; do
             pause_menu
             ;;
         14)
-            error "XrayR 官方仓库已明确标注“项目已废弃”，安装入口已经移除。"
-            warn "如仍需兼容旧节点，请使用菜单 15 的备份版本，并自行评估安全风险。"
-            pause_menu
+            check_installed "xrayr" "XrayR 官方版" "xrayr" || { pause_menu; continue; }
+            warn "XrayR 官方项目已停止维护，本入口固定安装最后的官方版本 v0.9.4。"
+            warn "该版本不会再获得安全更新，请仅在兼容旧节点时使用。"
+            read -r -p "是否继续安装？(y/n, 默认n): " xrayr_official_confirm
+            if [[ $xrayr_official_confirm != [yY] ]]; then
+                continue
+            fi
+            if run_remote_script "${VENDOR_RAW_URL}/scripts/xrayr-official-install.sh"; then
+                if command_exists xrayr && [[ -f /etc/systemd/system/XrayR.service ]]; then
+                    info "XrayR 官方版 v0.9.4 安装完成。管理命令: xrayr"
+                    warn "请编辑 /etc/XrayR/config.yml 填写面板参数，然后执行: xrayr restart"
+                else
+                    error "安装脚本已结束，但未检测到 XrayR 管理命令或服务文件。"
+                fi
+            else
+                error "XrayR 官方版安装脚本下载或执行失败。"
+            fi
+            show_mini_header
             ;;
         15)
             check_installed "xrayr" "XrayR 柚子" "xrayr" || { pause_menu; continue; }

@@ -174,6 +174,7 @@ install_XrayR() {
     if [[ ! -f /etc/XrayR/rulelist ]]; then
         cp rulelist /etc/XrayR/
     fi
+    printf '%s\n' "backup" > /etc/XrayR/install-source
     curl -o /usr/bin/XrayR -Ls https://raw.githubusercontent.com/Taylor000/tool/master/vendor/scripts/xrayr/XrayR.sh
     chmod +x /usr/bin/XrayR
     ln -s /usr/bin/XrayR /usr/bin/xrayr # 小写兼容
