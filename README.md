@@ -6,8 +6,8 @@
 
 - 系统工具：查看系统信息与性能测试、修改 root 密码、修改 SSH 端口、启用 BBR、安装 iperf3。
 - 系统重装：安装 Debian 11、Debian 12、Windows 10 LTSC，或使用交互脚本选择 Windows 镜像。
-- 服务部署：安装 aaPanel 备份版、Docker、ServerStatus 和 Komari。
-- 节点后端：安装 XrayR 柚子备份版和 v2node。
+- 服务部署：安装 aaPanel 、Docker、ServerStatus 和 Komari。
+- 节点后端：安装 XrayR 和 v2node。
 - 脚本管理：自动检查更新，以及卸载脚本和快捷命令。
 
 ## 使用方法
@@ -20,6 +20,3 @@ chmod +x /usr/local/bin/tool
 tool
 ```
 
-## 注意事项
-
-系统重装会清空服务器数据，执行前请务必备份。部署服务后，请结合云防火墙限制管理端口的访问来源。
