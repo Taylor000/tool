@@ -19,7 +19,7 @@ NC='\033[0m'
 AUTHOR_GITHUB="https://github.com/Taylor000"
 SCRIPT_NAME="一个人的脚本百宝箱"
 SHORTCUT_CMD="tool"
-SCRIPT_VERSION="2.1.12"
+SCRIPT_VERSION="2.1.13"
 MIN_SUPPORTED_VERSION="2.1.4"
 SCRIPT_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool/master/tool.sh"
 VENDOR_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool/master/vendor"
@@ -459,18 +459,14 @@ show_menu() {
     echo -e "${YELLOW} 8.${NC} 安装 Win10 LTSC 系统 (秋水逸冰)"
     echo -e "${YELLOW} 9.${NC} 安装 Windows 系统 (veip007 交互版)"
     echo -e "${YELLOW} 10.${NC} 安装 aaPanel 面板 (mzwrt 备份版)"
-    echo -e "${YELLOW} 11.${NC} ${RED}aaPanel 官方版入口暂不可用${NC}"
-    echo -e "${YELLOW} 12.${NC} 安装 Docker 运行环境"
-    echo -e "${YELLOW} 13.${NC} 打开 Realm 端口转发管理脚本"
-    echo -e "${YELLOW} 14.${NC} 安装 ServerStatus 监控探针"
-    echo -e "${YELLOW} 15.${NC} 安装 Komari 监控探针 (Docker版)"
-    echo -e "${YELLOW} 16.${NC} 安装 Xray 代理服务 (233boy版)"
-    echo -e "${YELLOW} 17.${NC} 安装 3X-UI 面板 (Docker版)"
-    echo -e "${YELLOW} 18.${NC} ${RED}XrayR 官方版 (项目已废弃)${NC}"
-    echo -e "${YELLOW} 19.${NC} 安装 XrayR 后端对接 (柚子备份版，需配置)"
-    echo -e "${YELLOW} 20.${NC} 安装 v2node 后端对接 (官方版)"
+    echo -e "${YELLOW} 11.${NC} 安装 Docker 运行环境"
+    echo -e "${YELLOW} 12.${NC} 安装 ServerStatus 监控探针"
+    echo -e "${YELLOW} 13.${NC} 安装 Komari 监控探针 (Docker版)"
+    echo -e "${YELLOW} 14.${NC} ${RED}XrayR 官方版 (项目已废弃)${NC}"
+    echo -e "${YELLOW} 15.${NC} 安装 XrayR 后端对接 (柚子备份版，需配置)"
+    echo -e "${YELLOW} 16.${NC} 安装 v2node 后端对接 (官方版)"
     echo -e "${BLUE}--------------------------------------------------${NC}"
-    echo -e "${YELLOW} 21.${NC} ${RED}卸载并删除本脚本${NC}"
+    echo -e "${YELLOW} 17.${NC} ${RED}卸载并删除本脚本${NC}"
     echo -e "${RED} 0.${NC} 退出脚本 (或双击回车)${NC}"
     echo -e "${BLUE}==================================================${NC}"
 }
@@ -616,23 +612,13 @@ while true; do
             show_mini_header
             ;;
         11)
-            error "aaPanel 官方安装脚本当前不可用：官方历史入口 install_panel_en.sh / install_7.0_en.sh 返回 404 或证书校验失败。"
-            warn "如需安装 aaPanel，请先使用菜单 10 的 mzwrt 备份版，或手动从 aaPanel 官网获取最新安装命令后再执行。"
-            pause_menu
-            ;;
-        12)
             check_installed "docker" "Docker" "docker ps" || { pause_menu; continue; }
             if check_docker; then
                 info "Docker 安装完成并已正常运行。"
             fi
             pause_menu
             ;;
-        13)
-            check_installed "realm" "Realm" "realm" || { pause_menu; continue; }
-            run_remote_script "${VENDOR_RAW_URL}/scripts/wcwq98-realm.sh" ||
-                error "Realm 安装脚本下载或执行失败。"
-            ;;
-        14)
+        12)
             check_docker || { pause_menu; continue; }
             if docker ps -a --format '{{.Names}}' | grep -q "^status$"; then
                 read -r -p "探针容器已存在，是否重装？(y/n): " re_status
@@ -682,7 +668,7 @@ while true; do
             fi
             pause_menu
             ;;
-        15)
+        13)
             check_docker || { pause_menu; continue; }
             read -r -p "设置安装目录 (默认 $HOME/komari): " k_dir
             k_dir=${k_dir:-"$HOME/komari"}
@@ -729,78 +715,12 @@ while true; do
             fi
             pause_menu
             ;;
-        16)
-            check_installed "xray" "Xray" "xray" || { pause_menu; continue; }
-            xray_status=0
-            run_remote_script "${VENDOR_RAW_URL}/scripts/233boy-xray-install.sh" || xray_status=$?
-            if command_exists xray; then
-                info "Xray 安装完成。管理命令: xray"
-                if [[ "$xray_status" -ne 0 ]]; then
-                    warn "上游脚本返回非零状态，但已检测到 Xray 已安装。"
-                fi
-            else
-                error "Xray 安装脚本下载或执行失败。"
-            fi
-            show_mini_header
-            ;;
-        17)
-            check_docker || { pause_menu; continue; }
-            read -r -p "设置 Docker 容器名称 (默认 3x-ui): " x_name
-            x_name=${x_name:-3x-ui}
-            read -r -p "设置面板映射端口 (默认 2053): " x_port
-            x_port=${x_port:-2053}
-
-            if ! valid_port "$x_port" || ! valid_container_name "$x_name"; then
-                error "端口或容器名称格式无效。"
-                pause_menu
-                continue
-            fi
-            if docker ps -a --format '{{.Names}}' | grep -Fxq "$x_name"; then
-                read -r -p "检测到名为 ${x_name} 的容器已存在，是否删除重装？(y/n): " re_x
-                [[ $re_x != [yY] ]] && continue
-                docker rm -f "$x_name" >/dev/null || {
-                    error "旧容器删除失败。"
-                    pause_menu
-                    continue
-                }
-            fi
-
-            x_data_dir="$HOME/3x-ui/db"
-            x_cert_dir="$HOME/3x-ui/cert"
-            mkdir -p "$x_data_dir" "$x_cert_dir"
-            if docker run -d \
-              --name "$x_name" \
-              --cap-add NET_ADMIN \
-              --cap-add NET_RAW \
-              -p "${BIND_IP}:${x_port}:2053" \
-              -e XUI_PORT=2053 \
-              -e XUI_ENABLE_FAIL2BAN=true \
-              -v "$x_data_dir:/etc/x-ui/" \
-              -v "$x_cert_dir:/root/cert/" \
-              --restart unless-stopped \
-              ghcr.io/mhsanaei/3x-ui:latest >/dev/null &&
-              wait_for_container "$x_name"; then
-                info "3X-UI Docker 安装完成！"
-                if [[ $BIND_IP == "127.0.0.1" ]]; then
-                    echo -e "反向代理目标: ${BLUE}http://127.0.0.1:${x_port}${NC}"
-                else
-                    get_network_info || LOCAL_IP="服务器公网IP"
-                    echo -e "访问地址: ${BLUE}http://${LOCAL_IP}:${x_port}${NC}"
-                fi
-                warn "面板会生成随机用户名、密码和访问路径，请查看容器日志："
-                docker logs --tail 50 "$x_name" 2>&1
-            else
-                error "3X-UI 容器创建或启动失败。"
-                docker logs --tail 30 "$x_name" 2>/dev/null || true
-            fi
-            show_mini_header
-            ;;
-        18)
+        14)
             error "XrayR 官方仓库已明确标注“项目已废弃”，安装入口已经移除。"
-            warn "如仍需兼容旧节点，请使用菜单 19 的备份版本，并自行评估安全风险。"
+            warn "如仍需兼容旧节点，请使用菜单 15 的备份版本，并自行评估安全风险。"
             pause_menu
             ;;
-        19)
+        15)
             check_installed "xrayr" "XrayR 柚子" "xrayr" || { pause_menu; continue; }
             if run_remote_script "${VENDOR_RAW_URL}/scripts/youzi3-xrayr-install.sh"; then
                 if command_exists xrayr || command_exists XrayR; then
@@ -818,7 +738,7 @@ while true; do
             fi
             show_mini_header
             ;;
-        20)
+        16)
             check_installed "v2node" "v2node" "v2node" || { pause_menu; continue; }
             read -r -p "面板 API 地址 (例如 https://example.com/，留空则只安装程序): " v2_api_host
             read -r -p "节点 ID (留空则只安装程序): " v2_node_id
@@ -852,7 +772,7 @@ while true; do
             fi
             show_mini_header
             ;;
-        21)
+        17)
             read -r -p "确定要删除本脚本及快捷命令吗？(y/n): " del_confirm
             if [[ $del_confirm == [yY] ]]; then
                 rm -f "/usr/local/bin/${SHORTCUT_CMD}"
