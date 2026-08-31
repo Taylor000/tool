@@ -19,7 +19,7 @@ NC='\033[0m'
 AUTHOR_GITHUB="https://github.com/Taylor000"
 SCRIPT_NAME="一个人的脚本百宝箱"
 SHORTCUT_CMD="tool"
-SCRIPT_VERSION="2.1.14"
+SCRIPT_VERSION="2.1.15"
 MIN_SUPPORTED_VERSION="2.1.4"
 SCRIPT_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool/master/tool.sh"
 VENDOR_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool/master/vendor"
@@ -31,6 +31,8 @@ DEFAULT_PASS="github.taylor000"
 BIND_IP="127.0.0.1"
 PUBLIC_BIND_IP="0.0.0.0"
 APT_INDEX_REFRESHED=0
+WIN10_LTSC_IMAGE_URL="https://dl.lamp.sh/vhd/zh-cn_windows10_ltsc.xz"
+WIN11_LTSC_UEFI_IMAGE_URL="https://dl.lamp.sh/vhd/zh-cn_win11_ltsc_uefi.xz"
 
 # 检查是否为 Root
 [[ $EUID -ne 0 ]] && echo -e "${RED}错误：请使用 root 用户运行此脚本！${NC}" && exit 1
@@ -347,6 +349,21 @@ check_dd_dependencies() {
     fi
 }
 
+check_windows_uefi_requirements() {
+    local architecture
+
+    architecture=$(uname -m)
+    if [[ $architecture != "x86_64" && $architecture != "amd64" ]]; then
+        error "Windows 11 LTSC 镜像仅支持 x86_64 架构，当前架构：$architecture"
+        return 1
+    fi
+
+    if [[ ! -d /sys/firmware/efi ]]; then
+        error "Windows 11 LTSC 镜像需要服务器以 UEFI 模式启动。"
+        return 1
+    fi
+}
+
 # 获取系统基本网络信息
 get_network_info() {
     LOCAL_IP=$(curl --fail --silent --show-error --ipv4 --max-time 10 https://api64.ipify.org \
@@ -457,16 +474,17 @@ show_menu() {
     echo -e "${YELLOW} 6.${NC} 安装 Debian 11 系统 (萌咖版)"
     echo -e "${YELLOW} 7.${NC} 安装 Debian 12 系统 (萌咖版)"
     echo -e "${YELLOW} 8.${NC} 安装 Win10 LTSC 系统 (秋水逸冰)"
-    echo -e "${YELLOW} 9.${NC} 安装 Windows 系统 (veip007 交互版)"
-    echo -e "${YELLOW} 10.${NC} 安装 aaPanel 面板 (mzwrt 备份版)"
-    echo -e "${YELLOW} 11.${NC} 安装 Docker 运行环境"
-    echo -e "${YELLOW} 12.${NC} 安装 ServerStatus 监控探针"
-    echo -e "${YELLOW} 13.${NC} 安装 Komari 监控探针 (Docker版)"
-    echo -e "${YELLOW} 14.${NC} 安装 XrayR 官方版 (v0.9.4，已停止维护)"
-    echo -e "${YELLOW} 15.${NC} 安装 XrayR 后端对接 (柚子备份版，需配置)"
-    echo -e "${YELLOW} 16.${NC} 安装 v2node 后端对接 (官方版)"
+    echo -e "${YELLOW} 9.${NC} 安装旧版 Windows (veip007 交互版)"
+    echo -e "${YELLOW} 10.${NC} 安装 Windows 11 LTSC 系统 (UEFI)"
+    echo -e "${YELLOW} 11.${NC} 安装 aaPanel 面板 (mzwrt 备份版)"
+    echo -e "${YELLOW} 12.${NC} 安装 Docker 运行环境"
+    echo -e "${YELLOW} 13.${NC} 安装 ServerStatus 监控探针"
+    echo -e "${YELLOW} 14.${NC} 安装 Komari 监控探针 (Docker版)"
+    echo -e "${YELLOW} 15.${NC} 安装 XrayR 官方版 (v0.9.4，已停止维护)"
+    echo -e "${YELLOW} 16.${NC} 安装 XrayR 后端对接 (柚子备份版，需配置)"
+    echo -e "${YELLOW} 17.${NC} 安装 v2node 后端对接 (官方版)"
     echo -e "${BLUE}--------------------------------------------------${NC}"
-    echo -e "${YELLOW} 17.${NC} ${RED}卸载并删除本脚本${NC}"
+    echo -e "${YELLOW} 18.${NC} ${RED}卸载并删除本脚本${NC}"
     echo -e "${RED} 0.${NC} 退出脚本 (或双击回车)${NC}"
     echo -e "${BLUE}==================================================${NC}"
 }
@@ -581,23 +599,45 @@ while true; do
             win_pass=${win_pass:-$DEFAULT_PASS}
             run_remote_script "${VENDOR_RAW_URL}/scripts/minlearn-inst.sh" \
                 -w "$win_pass" \
-                -t "https://dl.lamp.sh/vhd/zh-cn_windows10_ltsc.xz" ||
+                -t "$WIN10_LTSC_IMAGE_URL" ||
                 error "Windows 10 LTSC 重装脚本下载或执行失败。"
             ;;
         9)
             warn "警告：重装系统会清空当前服务器数据。"
-            read -r -p "确认打开 veip007 Windows DD 交互脚本？请输入 YES 继续: " reinstall_confirm
+            read -r -p "确认打开 veip007 旧版 Windows DD 交互脚本？请输入 YES 继续: " reinstall_confirm
             [[ $reinstall_confirm == "YES" ]] || continue
             check_dd_dependencies || {
                 error "DD 依赖安装失败，已取消重装。"
                 pause_menu
                 continue
             }
-            warn "请在上游交互菜单中选择 Windows 镜像并确认其默认密码。"
+            warn "上游可选 Win7 与 Windows Server 2008 R2/2012 R2/2016/2019，不含 Win10/Win11。"
+            warn "请在上游交互菜单中选择镜像并确认其默认密码。"
             run_remote_script "${VENDOR_RAW_URL}/scripts/veip007-dd-od.sh" ||
                 error "veip007 Windows DD 脚本下载或执行失败。"
             ;;
         10)
+            check_windows_uefi_requirements || {
+                pause_menu
+                continue
+            }
+            warn "警告：重装系统会清空当前服务器数据。"
+            warn "该 Windows 11 LTSC 镜像仅适用于 x86_64 UEFI 服务器。"
+            read -r -p "确认重装 Windows 11 LTSC？请输入 YES 继续: " reinstall_confirm
+            [[ $reinstall_confirm == "YES" ]] || continue
+            check_dd_dependencies || {
+                error "DD 依赖安装失败，已取消重装。"
+                pause_menu
+                continue
+            }
+            read -r -p "设置 Win11 密码 (默认 $DEFAULT_PASS): " win_pass
+            win_pass=${win_pass:-$DEFAULT_PASS}
+            run_remote_script "${VENDOR_RAW_URL}/scripts/minlearn-inst.sh" \
+                -w "$win_pass" \
+                -t "$WIN11_LTSC_UEFI_IMAGE_URL" ||
+                error "Windows 11 LTSC 重装脚本下载或执行失败。"
+            ;;
+        11)
             check_installed "bt" "aaPanel 面板" "bt" || { pause_menu; continue; }
             panel_url="${VENDOR_RAW_URL}/scripts/mzwrt-aapanel-install.sh"
             warn "即将安装第三方备份版 aaPanel。"
@@ -611,14 +651,14 @@ while true; do
             fi
             show_mini_header
             ;;
-        11)
+        12)
             check_installed "docker" "Docker" "docker ps" || { pause_menu; continue; }
             if check_docker; then
                 info "Docker 安装完成并已正常运行。"
             fi
             pause_menu
             ;;
-        12)
+        13)
             check_docker || { pause_menu; continue; }
             if docker ps -a --format '{{.Names}}' | grep -q "^status$"; then
                 read -r -p "探针容器已存在，是否重装？(y/n): " re_status
@@ -668,7 +708,7 @@ while true; do
             fi
             pause_menu
             ;;
-        13)
+        14)
             check_docker || { pause_menu; continue; }
             read -r -p "设置安装目录 (默认 $HOME/komari): " k_dir
             k_dir=${k_dir:-"$HOME/komari"}
@@ -715,7 +755,7 @@ while true; do
             fi
             pause_menu
             ;;
-        14)
+        15)
             check_installed "xrayr" "XrayR 官方版" "xrayr" || { pause_menu; continue; }
             warn "XrayR 官方项目已停止维护，本入口固定安装最后的官方版本 v0.9.4。"
             warn "该版本不会再获得安全更新，请仅在兼容旧节点时使用。"
@@ -735,7 +775,7 @@ while true; do
             fi
             show_mini_header
             ;;
-        15)
+        16)
             check_installed "xrayr" "XrayR 柚子" "xrayr" || { pause_menu; continue; }
             if run_remote_script "${VENDOR_RAW_URL}/scripts/youzi3-xrayr-install.sh"; then
                 if command_exists xrayr || command_exists XrayR; then
@@ -753,7 +793,7 @@ while true; do
             fi
             show_mini_header
             ;;
-        16)
+        17)
             check_installed "v2node" "v2node" "v2node" || { pause_menu; continue; }
             read -r -p "面板 API 地址 (例如 https://example.com/，留空则只安装程序): " v2_api_host
             read -r -p "节点 ID (留空则只安装程序): " v2_node_id
@@ -787,7 +827,7 @@ while true; do
             fi
             show_mini_header
             ;;
-        17)
+        18)
             read -r -p "确定要删除本脚本及快捷命令吗？(y/n): " del_confirm
             if [[ $del_confirm == [yY] ]]; then
                 rm -f "/usr/local/bin/${SHORTCUT_CMD}"
