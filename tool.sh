@@ -19,7 +19,7 @@ NC='\033[0m'
 AUTHOR_GITHUB="https://github.com/Taylor000"
 SCRIPT_NAME="一个人的脚本百宝箱"
 SHORTCUT_CMD="tool"
-SCRIPT_VERSION="2.1.15"
+SCRIPT_VERSION="2.1.16"
 MIN_SUPPORTED_VERSION="2.1.4"
 SCRIPT_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool/master/tool.sh"
 VENDOR_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool/master/vendor"
@@ -32,7 +32,7 @@ BIND_IP="127.0.0.1"
 PUBLIC_BIND_IP="0.0.0.0"
 APT_INDEX_REFRESHED=0
 WIN10_LTSC_IMAGE_URL="https://dl.lamp.sh/vhd/zh-cn_windows10_ltsc.xz"
-WIN11_LTSC_UEFI_IMAGE_URL="https://dl.lamp.sh/vhd/zh-cn_win11_ltsc_uefi.xz"
+WIN11_LTSC_IMAGE_URL="https://dl.lamp.sh/vhd/zh-cn_win11_ltsc.xz"
 
 # 检查是否为 Root
 [[ $EUID -ne 0 ]] && echo -e "${RED}错误：请使用 root 用户运行此脚本！${NC}" && exit 1
@@ -349,17 +349,12 @@ check_dd_dependencies() {
     fi
 }
 
-check_windows_uefi_requirements() {
+check_windows_x86_requirements() {
     local architecture
 
     architecture=$(uname -m)
     if [[ $architecture != "x86_64" && $architecture != "amd64" ]]; then
         error "Windows 11 LTSC 镜像仅支持 x86_64 架构，当前架构：$architecture"
-        return 1
-    fi
-
-    if [[ ! -d /sys/firmware/efi ]]; then
-        error "Windows 11 LTSC 镜像需要服务器以 UEFI 模式启动。"
         return 1
     fi
 }
@@ -475,7 +470,7 @@ show_menu() {
     echo -e "${YELLOW} 7.${NC} 安装 Debian 12 系统 (萌咖版)"
     echo -e "${YELLOW} 8.${NC} 安装 Win10 LTSC 系统 (秋水逸冰)"
     echo -e "${YELLOW} 9.${NC} 安装旧版 Windows (veip007 交互版)"
-    echo -e "${YELLOW} 10.${NC} 安装 Windows 11 LTSC 系统 (UEFI)"
+    echo -e "${YELLOW} 10.${NC} 安装 Windows 11 LTSC 系统"
     echo -e "${YELLOW} 11.${NC} 安装 aaPanel 面板 (mzwrt 备份版)"
     echo -e "${YELLOW} 12.${NC} 安装 Docker 运行环境"
     echo -e "${YELLOW} 13.${NC} 安装 ServerStatus 监控探针"
@@ -617,12 +612,12 @@ while true; do
                 error "veip007 Windows DD 脚本下载或执行失败。"
             ;;
         10)
-            check_windows_uefi_requirements || {
+            check_windows_x86_requirements || {
                 pause_menu
                 continue
             }
             warn "警告：重装系统会清空当前服务器数据。"
-            warn "该 Windows 11 LTSC 镜像仅适用于 x86_64 UEFI 服务器。"
+            warn "该 Windows 11 LTSC 镜像仅适用于 x86_64 服务器。"
             read -r -p "确认重装 Windows 11 LTSC？请输入 YES 继续: " reinstall_confirm
             [[ $reinstall_confirm == "YES" ]] || continue
             check_dd_dependencies || {
@@ -634,7 +629,7 @@ while true; do
             win_pass=${win_pass:-$DEFAULT_PASS}
             run_remote_script "${VENDOR_RAW_URL}/scripts/minlearn-inst.sh" \
                 -w "$win_pass" \
-                -t "$WIN11_LTSC_UEFI_IMAGE_URL" ||
+                -t "$WIN11_LTSC_IMAGE_URL" ||
                 error "Windows 11 LTSC 重装脚本下载或执行失败。"
             ;;
         11)
