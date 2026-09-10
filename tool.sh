@@ -19,7 +19,7 @@ NC='\033[0m'
 AUTHOR_GITHUB="https://github.com/Taylor000"
 SCRIPT_NAME="一个人的脚本百宝箱"
 SHORTCUT_CMD="tool"
-SCRIPT_VERSION="2.1.16"
+SCRIPT_VERSION="2.2.0"
 MIN_SUPPORTED_VERSION="2.1.4"
 SCRIPT_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool/master/tool.sh"
 VENDOR_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool/master/vendor"
@@ -33,6 +33,10 @@ PUBLIC_BIND_IP="0.0.0.0"
 APT_INDEX_REFRESHED=0
 WIN10_LTSC_IMAGE_URL="https://dl.lamp.sh/vhd/zh-cn_windows10_ltsc.xz"
 WIN11_LTSC_IMAGE_URL="https://dl.lamp.sh/vhd/zh-cn_win11_ltsc.xz"
+PREFERRED_IPV4_CONFIG_DIR="/etc/taylor-tool"
+PREFERRED_IPV4_CONFIG_FILE="${PREFERRED_IPV4_CONFIG_DIR}/preferred-ipv4.conf"
+PREFERRED_IPV4_SERVICE="taylor-tool-preferred-ipv4.service"
+PREFERRED_IPV4_UNIT_FILE="/etc/systemd/system/${PREFERRED_IPV4_SERVICE}"
 
 # 检查是否为 Root
 [[ $EUID -ne 0 ]] && echo -e "${RED}错误：请使用 root 用户运行此脚本！${NC}" && exit 1
@@ -374,6 +378,428 @@ get_network_info() {
     fi
 }
 
+valid_ipv4() {
+    local address=$1 octet value
+    local -a octets
+
+    [[ $address =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
+    IFS='.' read -r -a octets <<< "$address"
+    (( ${#octets[@]} == 4 )) || return 1
+    for octet in "${octets[@]}"; do
+        value=$((10#$octet))
+        (( value >= 0 && value <= 255 )) || return 1
+    done
+}
+
+is_public_ipv4() {
+    local address=$1
+    local first second third fourth
+
+    valid_ipv4 "$address" || return 1
+    IFS='.' read -r first second third fourth <<< "$address"
+    first=$((10#$first))
+    second=$((10#$second))
+    third=$((10#$third))
+    fourth=$((10#$fourth))
+
+    (( first == 0 || first == 10 || first == 127 || first >= 224 )) && return 1
+    (( first == 100 && second >= 64 && second <= 127 )) && return 1
+    (( first == 169 && second == 254 )) && return 1
+    (( first == 172 && second >= 16 && second <= 31 )) && return 1
+    (( first == 192 && second == 0 )) && return 1
+    (( first == 192 && second == 168 )) && return 1
+    (( first == 198 && (second == 18 || second == 19) )) && return 1
+    (( first == 198 && second == 51 && third == 100 )) && return 1
+    (( first == 203 && second == 0 && third == 113 )) && return 1
+    return 0
+}
+
+valid_interface_name() {
+    [[ $1 =~ ^[a-zA-Z0-9_.:-]+$ ]]
+}
+
+route_field() {
+    local route_line=$1 wanted=$2 index
+    local -a route_parts
+
+    read -r -a route_parts <<< "$route_line"
+    for ((index = 0; index + 1 < ${#route_parts[@]}; index++)); do
+        if [[ ${route_parts[index]} == "$wanted" ]]; then
+            printf '%s\n' "${route_parts[index + 1]}"
+            return 0
+        fi
+    done
+    return 1
+}
+
+get_active_ipv4_route() {
+    local route_line
+
+    route_line=$(ip -4 route get 1.1.1.1 2>/dev/null | head -n 1) || return 1
+    [[ -n $route_line ]] || return 1
+    ACTIVE_IPV4_INTERFACE=$(route_field "$route_line" dev) || return 1
+    ACTIVE_IPV4_INTERFACE=${ACTIVE_IPV4_INTERFACE%%@*}
+    ACTIVE_IPV4_SOURCE=$(route_field "$route_line" src) || return 1
+    ACTIVE_IPV4_GATEWAY=$(route_field "$route_line" via 2>/dev/null || true)
+    valid_interface_name "$ACTIVE_IPV4_INTERFACE" && valid_ipv4 "$ACTIVE_IPV4_SOURCE"
+}
+
+address_is_bound() {
+    local interface=$1 address=$2
+    local _index listed_interface family cidr remainder listed_address
+
+    while read -r _index listed_interface family cidr remainder; do
+        listed_interface=${listed_interface%%@*}
+        listed_address=${cidr%%/*}
+        if [[ $family == "inet" && $listed_interface == "$interface" && $listed_address == "$address" ]]; then
+            return 0
+        fi
+    done < <(ip -o -4 addr show dev "$interface" up 2>/dev/null)
+    return 1
+}
+
+collect_public_ipv4_addresses() {
+    local _index interface family cidr remainder address existing duplicate
+
+    PUBLIC_IPV4_ADDRESSES=()
+    PUBLIC_IPV4_PREFIXES=()
+    PUBLIC_IPV4_INTERFACES=()
+    while read -r _index interface family cidr remainder; do
+        [[ $family == "inet" ]] || continue
+        interface=${interface%%@*}
+        address=${cidr%%/*}
+        is_public_ipv4 "$address" || continue
+        duplicate=0
+        for existing in "${PUBLIC_IPV4_ADDRESSES[@]}"; do
+            [[ $existing == "$address" ]] && duplicate=1
+        done
+        (( duplicate == 1 )) && continue
+        PUBLIC_IPV4_ADDRESSES+=("$address")
+        PUBLIC_IPV4_PREFIXES+=("$cidr")
+        PUBLIC_IPV4_INTERFACES+=("$interface")
+    done < <(ip -o -4 addr show up scope global 2>/dev/null)
+}
+
+probe_outbound_ipv4() {
+    local bind_address=${1:-} response url
+    local -a curl_arguments
+
+    command_exists curl || return 1
+    curl_arguments=(--fail --location --silent --ipv4 --noproxy '*'
+        --connect-timeout 4 --max-time 8)
+    [[ -n $bind_address ]] && curl_arguments+=(--interface "$bind_address")
+
+    for url in https://api64.ipify.org https://ifconfig.me/ip https://ip.gs; do
+        response=$(curl "${curl_arguments[@]}" "$url" 2>/dev/null | tr -d '[:space:]') || continue
+        if valid_ipv4 "$response"; then
+            printf '%s\n' "$response"
+            return 0
+        fi
+    done
+    return 1
+}
+
+get_default_route_for_interface() {
+    local interface=$1 route_line route_gateway
+
+    while IFS= read -r route_line; do
+        [[ -n $route_line && $route_line != *" nexthop "* ]] || continue
+        route_gateway=$(route_field "$route_line" via 2>/dev/null || true)
+        if [[ -z ${ACTIVE_IPV4_GATEWAY:-} || $route_gateway == "$ACTIVE_IPV4_GATEWAY" ]]; then
+            printf '%s\n' "$route_line"
+            return 0
+        fi
+    done < <(ip -4 route show table main default dev "$interface" 2>/dev/null)
+    return 1
+}
+
+set_preferred_ipv4_source() {
+    local interface=$1 address=$2 route_line gateway metric
+    local -a route_command
+
+    valid_interface_name "$interface" && valid_ipv4 "$address" || return 1
+    address_is_bound "$interface" "$address" || return 1
+    route_line=$(get_default_route_for_interface "$interface") || return 1
+    [[ $route_line != *" nexthop "* ]] || return 1
+
+    gateway=$(route_field "$route_line" via 2>/dev/null || true)
+    metric=$(route_field "$route_line" metric 2>/dev/null || true)
+    [[ -z $gateway ]] || valid_ipv4 "$gateway" || return 1
+    [[ -z $metric || $metric =~ ^[0-9]+$ ]] || return 1
+
+    route_command=(ip -4 route replace default)
+    [[ -n $gateway ]] && route_command+=(via "$gateway")
+    route_command+=(dev "$interface" src "$address")
+    [[ $route_line == *" onlink"* ]] && route_command+=(onlink)
+    [[ -n $metric ]] && route_command+=(metric "$metric")
+    "${route_command[@]}"
+}
+
+show_public_ipv4_status() {
+    local external_ip="检测失败" marker selectable index saved_address="" saved_interface=""
+
+    collect_public_ipv4_addresses
+    if ! get_active_ipv4_route; then
+        error "无法读取当前 IPv4 默认出口路由。"
+        return 1
+    fi
+    external_ip=$(probe_outbound_ipv4 || true)
+    external_ip=${external_ip:-"检测失败"}
+
+    if [[ -f $PREFERRED_IPV4_CONFIG_FILE ]]; then
+        saved_interface=$(sed -n 's/^interface=//p' "$PREFERRED_IPV4_CONFIG_FILE" | head -n 1)
+        saved_address=$(sed -n 's/^address=//p' "$PREFERRED_IPV4_CONFIG_FILE" | head -n 1)
+    fi
+
+    echo -e "\n${BLUE}================ IPv4 默认出口管理 ================${NC}"
+    if (( ${#PUBLIC_IPV4_ADDRESSES[@]} == 0 )); then
+        warn "没有检测到直接绑定在网卡上的公网 IPv4 地址。"
+    else
+        printf '%-5s %-14s %-20s %-12s %-12s\n' "序号" "网卡" "公网 IPv4" "当前首选" "可切换"
+        for ((index = 0; index < ${#PUBLIC_IPV4_ADDRESSES[@]}; index++)); do
+            marker="否"
+            selectable="否"
+            if [[ ${PUBLIC_IPV4_INTERFACES[index]} == "$ACTIVE_IPV4_INTERFACE" ]]; then
+                selectable="是"
+                [[ ${PUBLIC_IPV4_ADDRESSES[index]} == "$ACTIVE_IPV4_SOURCE" ]] && marker="是"
+            fi
+            printf '%-5s %-14s %-20s %-12s %-12s\n' \
+                "$((index + 1))" "${PUBLIC_IPV4_INTERFACES[index]}" \
+                "${PUBLIC_IPV4_PREFIXES[index]}" "$marker" "$selectable"
+        done
+    fi
+    echo -e "${BLUE}----------------------------------------------------${NC}"
+    echo -e "默认出口网卡: ${YELLOW}${ACTIVE_IPV4_INTERFACE}${NC}"
+    echo -e "内核首选源 IP: ${YELLOW}${ACTIVE_IPV4_SOURCE}${NC}"
+    echo -e "外部检测出口 IP: ${YELLOW}${external_ip}${NC}"
+    if [[ -n $ACTIVE_IPV4_GATEWAY ]]; then
+        echo -e "默认网关: ${YELLOW}${ACTIVE_IPV4_GATEWAY}${NC}"
+    fi
+    if [[ -n $saved_address && -n $saved_interface ]]; then
+        echo -e "永久设置: ${GREEN}${saved_interface} / ${saved_address}${NC}"
+    else
+        echo -e "永久设置: ${YELLOW}未启用${NC}"
+    fi
+    if valid_ipv4 "$external_ip" && [[ $external_ip != "$ACTIVE_IPV4_SOURCE" ]]; then
+        warn "外部出口与内核源 IP 不同，可能存在云厂商 NAT/SNAT。"
+    fi
+    echo -e "${BLUE}====================================================${NC}"
+}
+
+write_preferred_ipv4_persistence() {
+    local interface=$1 address=$2 config_temp unit_temp escaped_script
+
+    if ! command_exists systemctl || [[ ! -d /run/systemd/system ]]; then
+        error "当前系统未运行 systemd，只能使用临时切换模式。"
+        return 1
+    fi
+    [[ $CURRENT_SCRIPT == /* && -f $CURRENT_SCRIPT ]] || {
+        error "无法确定当前脚本的绝对路径，不能创建永久设置。"
+        return 1
+    }
+
+    config_temp=$(mktemp /tmp/tool-preferred-ipv4-config.XXXXXX) || return 1
+    unit_temp=$(mktemp /tmp/tool-preferred-ipv4-unit.XXXXXX) || {
+        rm -f "$config_temp"
+        return 1
+    }
+    printf 'interface=%s\naddress=%s\n' "$interface" "$address" > "$config_temp"
+
+    escaped_script=${CURRENT_SCRIPT//%/%%}
+    escaped_script=${escaped_script//\\/\\\\}
+    escaped_script=${escaped_script//\"/\\\"}
+    cat > "$unit_temp" <<EOF
+[Unit]
+Description=Apply Taylor Tool preferred IPv4 source address
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash "$escaped_script" --apply-preferred-ipv4
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    if ! install -d -m 755 "$PREFERRED_IPV4_CONFIG_DIR" ||
+       ! install -m 600 "$config_temp" "$PREFERRED_IPV4_CONFIG_FILE" ||
+       ! install -m 644 "$unit_temp" "$PREFERRED_IPV4_UNIT_FILE" ||
+       ! systemctl daemon-reload ||
+       ! systemctl enable "$PREFERRED_IPV4_SERVICE" >/dev/null; then
+        error "永久配置写入失败。"
+        rm -f "$config_temp" "$unit_temp"
+        rm -f "$PREFERRED_IPV4_CONFIG_FILE" "$PREFERRED_IPV4_UNIT_FILE"
+        rmdir "$PREFERRED_IPV4_CONFIG_DIR" 2>/dev/null || true
+        systemctl daemon-reload >/dev/null 2>&1 || true
+        return 1
+    fi
+    rm -f "$config_temp" "$unit_temp"
+    info "已设置开机首选 IPv4：${interface} / ${address}"
+}
+
+remove_preferred_ipv4_persistence() {
+    local quiet=${1:-0}
+
+    if [[ ! -f $PREFERRED_IPV4_CONFIG_FILE && ! -f $PREFERRED_IPV4_UNIT_FILE ]]; then
+        (( quiet == 1 )) || warn "当前没有永久 IPv4 出口设置。"
+        return 0
+    fi
+    if command_exists systemctl; then
+        systemctl disable --now "$PREFERRED_IPV4_SERVICE" >/dev/null 2>&1 || true
+    fi
+    rm -f "$PREFERRED_IPV4_CONFIG_FILE" "$PREFERRED_IPV4_UNIT_FILE"
+    rmdir "$PREFERRED_IPV4_CONFIG_DIR" 2>/dev/null || true
+    command_exists systemctl && systemctl daemon-reload >/dev/null 2>&1 || true
+    (( quiet == 1 )) || info "已取消开机永久 IPv4 出口设置；当前运行中的路由未改变。"
+}
+
+apply_saved_preferred_ipv4() {
+    local interface address attempt
+
+    [[ -f $PREFERRED_IPV4_CONFIG_FILE ]] || {
+        error "未找到永久 IPv4 配置。"
+        return 1
+    }
+    interface=$(sed -n 's/^interface=//p' "$PREFERRED_IPV4_CONFIG_FILE" | head -n 1)
+    address=$(sed -n 's/^address=//p' "$PREFERRED_IPV4_CONFIG_FILE" | head -n 1)
+    valid_interface_name "$interface" && is_public_ipv4 "$address" || {
+        error "永久 IPv4 配置内容无效。"
+        return 1
+    }
+
+    for ((attempt = 1; attempt <= 15; attempt++)); do
+        if address_is_bound "$interface" "$address" &&
+           get_active_ipv4_route &&
+           [[ $ACTIVE_IPV4_INTERFACE == "$interface" ]] &&
+           set_preferred_ipv4_source "$interface" "$address"; then
+            get_active_ipv4_route
+            if [[ $ACTIVE_IPV4_INTERFACE == "$interface" && $ACTIVE_IPV4_SOURCE == "$address" ]]; then
+                info "已应用永久首选 IPv4：${interface} / ${address}"
+                return 0
+            fi
+        fi
+        sleep 2
+    done
+    error "网络就绪后仍无法应用永久首选 IPv4。"
+    return 1
+}
+
+switch_preferred_ipv4() {
+    local mode=$1 selection selected_index selected_address selected_interface
+    local old_source preflight_ip actual_ip confirm
+
+    collect_public_ipv4_addresses
+    get_active_ipv4_route || {
+        error "无法读取当前 IPv4 默认出口。"
+        return 1
+    }
+    (( ${#PUBLIC_IPV4_ADDRESSES[@]} > 0 )) || {
+        error "没有可选择的公网 IPv4。"
+        return 1
+    }
+
+    read -r -p "请输入要设为默认出口的 IP 序号: " selection
+    [[ $selection =~ ^[0-9]+$ ]] || {
+        error "请输入有效序号。"
+        return 1
+    }
+    selected_index=$((10#$selection - 1))
+    (( selected_index >= 0 && selected_index < ${#PUBLIC_IPV4_ADDRESSES[@]} )) || {
+        error "选择超出范围。"
+        return 1
+    }
+    selected_address=${PUBLIC_IPV4_ADDRESSES[selected_index]}
+    selected_interface=${PUBLIC_IPV4_INTERFACES[selected_index]}
+    if [[ $selected_interface != "$ACTIVE_IPV4_INTERFACE" ]]; then
+        error "所选 IP 位于非默认网卡 ${selected_interface}。为避免 SSH 失联，本版本不自动切换网关或网卡 metric。"
+        return 1
+    fi
+
+    warn "正在使用 ${selected_address} 进行切换前公网出口验证..."
+    preflight_ip=$(probe_outbound_ipv4 "$selected_address" || true)
+    if [[ $preflight_ip != "$selected_address" ]]; then
+        if valid_ipv4 "$preflight_ip"; then
+            error "该地址出站后被转换为 ${preflight_ip}，上游可能存在 SNAT，已取消切换。"
+        else
+            error "无法使用 ${selected_address} 访问公网，已取消切换。"
+        fi
+        return 1
+    fi
+
+    if [[ $mode == "permanent" ]]; then
+        warn "将把 ${selected_address} 设置为当前及开机后的默认 IPv4 出口。"
+    else
+        warn "将临时把 ${selected_address} 设置为默认 IPv4 出口，重启或重载网络后可能失效。"
+    fi
+    read -r -p "确认修改请输入 YES: " confirm
+    [[ $confirm == "YES" ]] || {
+        warn "已取消修改。"
+        return 0
+    }
+
+    old_source=$ACTIVE_IPV4_SOURCE
+    if [[ $old_source != "$selected_address" ]]; then
+        if ! set_preferred_ipv4_source "$selected_interface" "$selected_address"; then
+            error "默认路由修改失败。"
+            return 1
+        fi
+    fi
+
+    get_active_ipv4_route || true
+    actual_ip=$(probe_outbound_ipv4 || true)
+    if [[ $ACTIVE_IPV4_INTERFACE != "$selected_interface" ||
+          $ACTIVE_IPV4_SOURCE != "$selected_address" ||
+          $actual_ip != "$selected_address" ]]; then
+        error "切换后的路由或公网出口验证失败，正在恢复 ${old_source}。"
+        set_preferred_ipv4_source "$selected_interface" "$old_source" ||
+            error "自动恢复失败，请立即检查默认路由。"
+        return 1
+    fi
+
+    info "默认 IPv4 出口已切换为 ${selected_address}（网卡 ${selected_interface}）。"
+    if [[ $mode == "permanent" ]]; then
+        if ! write_preferred_ipv4_persistence "$selected_interface" "$selected_address"; then
+            warn "当前切换已经生效，但永久设置失败；重启后可能恢复。"
+            return 1
+        fi
+    fi
+}
+
+public_ipv4_menu() {
+    local network_choice remove_confirm
+
+    if ! command_exists curl; then
+        warn "此功能需要 curl 来验证实际公网出口，正在安装。"
+        install_packages curl || {
+            error "curl 安装失败，无法使用 IPv4 出口管理。"
+            return 1
+        }
+    fi
+    while true; do
+        show_public_ipv4_status || true
+        echo -e "${YELLOW} 1.${NC} 刷新检测"
+        echo -e "${YELLOW} 2.${NC} 临时设置默认出口 IPv4"
+        echo -e "${YELLOW} 3.${NC} 设置默认出口 IPv4 并永久生效"
+        echo -e "${YELLOW} 4.${NC} 取消永久设置（不改变当前出口）"
+        echo -e "${RED} 0.${NC} 返回主菜单"
+        read -r -p "请选择操作: " network_choice
+        case $network_choice in
+            1) continue ;;
+            2) switch_preferred_ipv4 temporary; pause_menu ;;
+            3) switch_preferred_ipv4 permanent; pause_menu ;;
+            4)
+                read -r -p "确认取消开机永久设置？(y/n): " remove_confirm
+                [[ $remove_confirm == [yY] ]] && remove_preferred_ipv4_persistence
+                pause_menu
+                ;;
+            0) return 0 ;;
+            *) error "选择无效。"; sleep 1 ;;
+        esac
+    done
+}
+
 # 开启 BBR 逻辑
 enable_bbr() {
     local kernel_version bbr_script
@@ -466,23 +892,30 @@ show_menu() {
     echo -e "${YELLOW} 3.${NC} 修改 SSH 服务端口"
     echo -e "${YELLOW} 4.${NC} 安装 BBR 加速插件"
     echo -e "${YELLOW} 5.${NC} 安装 iperf3 网络测速工具"
-    echo -e "${YELLOW} 6.${NC} 安装 Debian 11 系统 (萌咖版)"
-    echo -e "${YELLOW} 7.${NC} 安装 Debian 12 系统 (萌咖版)"
-    echo -e "${YELLOW} 8.${NC} 安装 Win10 LTSC 系统 (秋水逸冰)"
-    echo -e "${YELLOW} 9.${NC} 安装旧版 Windows (veip007 交互版)"
-    echo -e "${YELLOW} 10.${NC} 安装 Windows 11 LTSC 系统"
-    echo -e "${YELLOW} 11.${NC} 安装 aaPanel 面板 (mzwrt 备份版)"
-    echo -e "${YELLOW} 12.${NC} 安装 Docker 运行环境"
-    echo -e "${YELLOW} 13.${NC} 安装 ServerStatus 监控探针"
-    echo -e "${YELLOW} 14.${NC} 安装 Komari 监控探针 (Docker版)"
-    echo -e "${YELLOW} 15.${NC} 安装 XrayR 官方版 (v0.9.4，已停止维护)"
-    echo -e "${YELLOW} 16.${NC} 安装 XrayR 后端对接 (柚子备份版，需配置)"
-    echo -e "${YELLOW} 17.${NC} 安装 v2node 后端对接 (官方版)"
+    echo -e "${YELLOW} 6.${NC} 公网 IPv4 与默认出口管理"
+    echo -e "${YELLOW} 7.${NC} 安装 Debian 11 系统 (萌咖版)"
+    echo -e "${YELLOW} 8.${NC} 安装 Debian 12 系统 (萌咖版)"
+    echo -e "${YELLOW} 9.${NC} 安装 Win10 LTSC 系统 (秋水逸冰)"
+    echo -e "${YELLOW} 10.${NC} 安装旧版 Windows (veip007 交互版)"
+    echo -e "${YELLOW} 11.${NC} 安装 Windows 11 LTSC 系统"
+    echo -e "${YELLOW} 12.${NC} 安装 aaPanel 面板 (mzwrt 备份版)"
+    echo -e "${YELLOW} 13.${NC} 安装 Docker 运行环境"
+    echo -e "${YELLOW} 14.${NC} 安装 ServerStatus 监控探针"
+    echo -e "${YELLOW} 15.${NC} 安装 Komari 监控探针 (Docker版)"
+    echo -e "${YELLOW} 16.${NC} 安装 XrayR 官方版 (v0.9.4，已停止维护)"
+    echo -e "${YELLOW} 17.${NC} 安装 XrayR 后端对接 (柚子备份版，需配置)"
+    echo -e "${YELLOW} 18.${NC} 安装 v2node 后端对接 (官方版)"
     echo -e "${BLUE}--------------------------------------------------${NC}"
-    echo -e "${YELLOW} 18.${NC} ${RED}卸载并删除本脚本${NC}"
+    echo -e "${YELLOW} 19.${NC} ${RED}卸载并删除本脚本${NC}"
     echo -e "${RED} 0.${NC} 退出脚本 (或双击回车)${NC}"
     echo -e "${BLUE}==================================================${NC}"
 }
+
+# systemd 开机任务仅应用已保存的 IPv4 设置，不进入交互菜单或联网更新。
+if [[ ${1:-} == "--apply-preferred-ipv4" ]]; then
+    apply_saved_preferred_ipv4
+    exit $?
+fi
 
 # 脚本运行初始化
 record_usage_count
@@ -565,8 +998,11 @@ while true; do
             fi
             pause_menu
             ;;
-        6 | 7)
-            ver="11" && [[ "$choice" == "7" ]] && ver="12"
+        6)
+            public_ipv4_menu
+            ;;
+        7 | 8)
+            ver="11" && [[ "$choice" == "8" ]] && ver="12"
             warn "警告：重装系统会清空当前服务器数据。"
             read -r -p "确认重装 Debian $ver？请输入 YES 继续: " reinstall_confirm
             [[ $reinstall_confirm == "YES" ]] || continue
@@ -581,7 +1017,7 @@ while true; do
                 -d "$ver" -v 64 -a -p "$dd_pass" ||
                 error "Debian $ver 重装脚本下载或执行失败。"
             ;;
-        8)
+        9)
             warn "警告：重装系统会清空当前服务器数据。"
             read -r -p "确认重装 Windows 10 LTSC？请输入 YES 继续: " reinstall_confirm
             [[ $reinstall_confirm == "YES" ]] || continue
@@ -597,7 +1033,7 @@ while true; do
                 -t "$WIN10_LTSC_IMAGE_URL" ||
                 error "Windows 10 LTSC 重装脚本下载或执行失败。"
             ;;
-        9)
+        10)
             warn "警告：重装系统会清空当前服务器数据。"
             read -r -p "确认打开 veip007 旧版 Windows DD 交互脚本？请输入 YES 继续: " reinstall_confirm
             [[ $reinstall_confirm == "YES" ]] || continue
@@ -611,7 +1047,7 @@ while true; do
             run_remote_script "${VENDOR_RAW_URL}/scripts/veip007-dd-od.sh" ||
                 error "veip007 Windows DD 脚本下载或执行失败。"
             ;;
-        10)
+        11)
             check_windows_x86_requirements || {
                 pause_menu
                 continue
@@ -632,7 +1068,7 @@ while true; do
                 -t "$WIN11_LTSC_IMAGE_URL" ||
                 error "Windows 11 LTSC 重装脚本下载或执行失败。"
             ;;
-        11)
+        12)
             check_installed "bt" "aaPanel 面板" "bt" || { pause_menu; continue; }
             panel_url="${VENDOR_RAW_URL}/scripts/mzwrt-aapanel-install.sh"
             warn "即将安装第三方备份版 aaPanel。"
@@ -646,14 +1082,14 @@ while true; do
             fi
             show_mini_header
             ;;
-        12)
+        13)
             check_installed "docker" "Docker" "docker ps" || { pause_menu; continue; }
             if check_docker; then
                 info "Docker 安装完成并已正常运行。"
             fi
             pause_menu
             ;;
-        13)
+        14)
             check_docker || { pause_menu; continue; }
             if docker ps -a --format '{{.Names}}' | grep -q "^status$"; then
                 read -r -p "探针容器已存在，是否重装？(y/n): " re_status
@@ -703,7 +1139,7 @@ while true; do
             fi
             pause_menu
             ;;
-        14)
+        15)
             check_docker || { pause_menu; continue; }
             read -r -p "设置安装目录 (默认 $HOME/komari): " k_dir
             k_dir=${k_dir:-"$HOME/komari"}
@@ -750,7 +1186,7 @@ while true; do
             fi
             pause_menu
             ;;
-        15)
+        16)
             check_installed "xrayr" "XrayR 官方版" "xrayr" || { pause_menu; continue; }
             warn "XrayR 官方项目已停止维护，本入口固定安装最后的官方版本 v0.9.4。"
             warn "该版本不会再获得安全更新，请仅在兼容旧节点时使用。"
@@ -770,7 +1206,7 @@ while true; do
             fi
             show_mini_header
             ;;
-        16)
+        17)
             check_installed "xrayr" "XrayR 柚子" "xrayr" || { pause_menu; continue; }
             if run_remote_script "${VENDOR_RAW_URL}/scripts/youzi3-xrayr-install.sh"; then
                 if command_exists xrayr || command_exists XrayR; then
@@ -788,7 +1224,7 @@ while true; do
             fi
             show_mini_header
             ;;
-        17)
+        18)
             check_installed "v2node" "v2node" "v2node" || { pause_menu; continue; }
             read -r -p "面板 API 地址 (例如 https://example.com/，留空则只安装程序): " v2_api_host
             read -r -p "节点 ID (留空则只安装程序): " v2_node_id
@@ -822,9 +1258,10 @@ while true; do
             fi
             show_mini_header
             ;;
-        18)
+        19)
             read -r -p "确定要删除本脚本及快捷命令吗？(y/n): " del_confirm
             if [[ $del_confirm == [yY] ]]; then
+                remove_preferred_ipv4_persistence 1
                 rm -f "/usr/local/bin/${SHORTCUT_CMD}"
                 echo -e "${GREEN}快捷命令已删除。${NC}"
                 rm -f "$0"
