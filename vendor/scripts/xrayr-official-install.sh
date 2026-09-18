@@ -2,8 +2,8 @@
 
 set -o pipefail
 
-OFFICIAL_VERSION="v0.9.4"
-OFFICIAL_RELEASE_URL="https://github.com/XrayR-project/XrayR/releases/download"
+FROZEN_VERSION="v0.9.4"
+SELF_HOSTED_RELEASE_URL="https://raw.githubusercontent.com/Taylor000/XrayR/master/release/${FROZEN_VERSION}"
 VENDOR_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool/master/vendor/scripts"
 INSTALL_DIR="/usr/local/XrayR"
 CONFIG_DIR="/etc/XrayR"
@@ -72,12 +72,12 @@ backup_file() {
 }
 
 [[ $EUID -eq 0 ]] || fail "必须使用 root 用户运行此脚本。"
-command_exists systemctl || fail "XrayR 官方版安装器仅支持使用 systemd 的系统。"
+command_exists systemctl || fail "XrayR 自用冻结版安装器仅支持使用 systemd 的系统。"
 
-requested_version=${1:-$OFFICIAL_VERSION}
+requested_version=${1:-$FROZEN_VERSION}
 [[ $requested_version == v* ]] || requested_version="v${requested_version}"
-if [[ $requested_version != "$OFFICIAL_VERSION" ]]; then
-    fail "官方项目已停止维护，本安装器仅提供最后版本 ${OFFICIAL_VERSION}。"
+if [[ $requested_version != "$FROZEN_VERSION" ]]; then
+    fail "自用仓库仅提供固定版本 ${FROZEN_VERSION}。"
 fi
 
 case $(uname -m) in
@@ -100,18 +100,18 @@ cleanup() {
 trap cleanup EXIT
 
 archive_name="XrayR-linux-${release_arch}.zip"
-archive_url="${OFFICIAL_RELEASE_URL}/${OFFICIAL_VERSION}/${archive_name}"
+archive_url="${SELF_HOSTED_RELEASE_URL}/${archive_name}"
 archive_file="${temp_dir}/${archive_name}"
-digest_file="${archive_file}.dgst"
+checksum_file="${temp_dir}/SHA256SUMS"
 extract_dir="${temp_dir}/extract"
 
-info "正在下载 XrayR 官方版 ${OFFICIAL_VERSION} (${release_arch})..."
-download_file "$archive_url" "$archive_file" || fail "官方发布包下载失败：${archive_url}"
-download_file "${archive_url}.dgst" "$digest_file" || fail "官方校验文件下载失败。"
+info "正在从 Taylor000/XrayR 下载自用冻结版 ${FROZEN_VERSION} (${release_arch})..."
+download_file "$archive_url" "$archive_file" || fail "自用仓库安装包下载失败：${archive_url}"
+download_file "${SELF_HOSTED_RELEASE_URL}/SHA256SUMS" "$checksum_file" || fail "自用仓库校验文件下载失败。"
 
-expected_sha256=$(sed -nE 's/^SHA2-256=[[:space:]]*([0-9a-fA-F]{64}).*/\1/p' "$digest_file" | head -n 1)
+expected_sha256=$(awk -v name="$archive_name" '$2 == name { print $1; exit }' "$checksum_file")
 actual_sha256=$(sha256sum "$archive_file" | awk '{print $1}')
-[[ -n "$expected_sha256" ]] || fail "官方校验文件中缺少 SHA-256。"
+[[ -n "$expected_sha256" ]] || fail "自用仓库校验文件中缺少 ${archive_name} 的 SHA-256。"
 [[ ${actual_sha256,,} == ${expected_sha256,,} ]] || fail "发布包 SHA-256 校验失败，已取消安装。"
 
 mkdir -p "$extract_dir"
@@ -160,7 +160,7 @@ if [[ -e /usr/bin/xrayr && ! -L /usr/bin/xrayr ]]; then
     rm -f /usr/bin/xrayr
 fi
 ln -sfn "$MANAGER_FILE" /usr/bin/xrayr
-printf '%s\n' "official" > "$CONFIG_DIR/install-source"
+printf '%s\n' "frozen" > "$CONFIG_DIR/install-source"
 
 systemctl daemon-reload
 systemctl enable XrayR >/dev/null || fail "XrayR 开机自启设置失败。"
@@ -175,5 +175,5 @@ else
     warn "已生成默认配置，填写面板参数前不会启动 XrayR 服务。"
 fi
 
-info "XrayR 官方版 ${OFFICIAL_VERSION} 安装完成。管理命令：xrayr"
-warn "官方项目已停止维护，此版本不会再获得功能或安全更新。"
+info "XrayR 自用冻结版 ${FROZEN_VERSION} 安装完成。管理命令：xrayr"
+warn "该版本固定不更新，不会再获得功能或安全更新。"

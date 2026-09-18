@@ -10,15 +10,16 @@ tool_raw_url="https://raw.githubusercontent.com/Taylor000/tool/master/vendor/scr
 install_source_file="/etc/XrayR/install-source"
 
 get_install_source() {
-    if [[ -f "$install_source_file" ]] && [[ $(<"$install_source_file") == "official" ]]; then
-        echo "official"
-    else
-        echo "backup"
-    fi
+    local source=""
+    [[ -f "$install_source_file" ]] && source=$(<"$install_source_file")
+    case "$source" in
+        official|frozen) echo "frozen" ;;
+        *) echo "backup" ;;
+    esac
 }
 
 get_installer_url() {
-    if [[ $(get_install_source) == "official" ]]; then
+    if [[ $(get_install_source) == "frozen" ]]; then
         echo "${tool_raw_url}/xrayr-official-install.sh"
     else
         echo "${tool_raw_url}/youzi3-xrayr-install.sh"
@@ -141,7 +142,9 @@ install() {
 }
 
 update() {
-    if [[ $# == 0 ]]; then
+    if [[ $(get_install_source) == "frozen" ]]; then
+        version=""
+    elif [[ $# == 0 ]]; then
         echo && echo -n -e "输入指定版本(默认最新版): " && read version
     else
         version=$2
@@ -160,7 +163,11 @@ update() {
         run_installer
     fi
     if [[ $? == 0 ]]; then
-        echo -e "${green}更新完成，已自动重启 XrayR，请使用 XrayR log 查看运行日志${plain}"
+        if [[ $(get_install_source) == "frozen" ]]; then
+            echo -e "${green}已重新安装 XrayR 自用冻结版 v0.9.4，并自动重启服务${plain}"
+        else
+            echo -e "${green}更新完成，已自动重启 XrayR，请使用 XrayR log 查看运行日志${plain}"
+        fi
         exit
     fi
 
@@ -401,7 +408,7 @@ show_enable_status() {
 
 show_XrayR_version() {
     echo -n "XrayR 版本："
-    if [[ $(get_install_source) == "official" ]]; then
+    if [[ $(get_install_source) == "frozen" ]]; then
         /usr/local/XrayR/XrayR version
     else
         /usr/local/XrayR/XrayR -version
@@ -423,8 +430,7 @@ show_usage() {
     echo "XrayR enable       - 设置 XrayR 开机自启"
     echo "XrayR disable      - 取消 XrayR 开机自启"
     echo "XrayR log          - 查看 XrayR 日志"
-    echo "XrayR update       - 更新 XrayR"
-    echo "XrayR update x.x.x - 更新 XrayR 指定版本"
+    echo "XrayR update       - 重新安装当前固定/备份版本"
     echo "XrayR install      - 安装 XrayR"
     echo "XrayR uninstall    - 卸载 XrayR"
     echo "XrayR version      - 查看 XrayR 版本"
@@ -433,8 +439,8 @@ show_usage() {
 
 show_menu() {
     local project_url
-    if [[ $(get_install_source) == "official" ]]; then
-        project_url="https://github.com/XrayR-project/XrayR (已停止维护)"
+    if [[ $(get_install_source) == "frozen" ]]; then
+        project_url="https://github.com/Taylor000/XrayR (自用冻结 v0.9.4)"
     else
         project_url="https://github.com/youzi3/XrayR"
     fi
