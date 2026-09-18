@@ -19,11 +19,13 @@ NC='\033[0m'
 AUTHOR_GITHUB="https://github.com/Taylor000"
 SCRIPT_NAME="一个人的脚本百宝箱"
 SHORTCUT_CMD="tool"
-SCRIPT_VERSION="2.2.0"
-MIN_SUPPORTED_VERSION="2.1.4"
+SCRIPT_VERSION="2.2.1"
+MIN_SUPPORTED_VERSION="2.2.1"
 SCRIPT_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool/master/tool.sh"
+REPOSITORY_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool"
 VENDOR_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool/master/vendor"
 USAGE_COUNTER_URL="https://hits.sh/github.com/Taylor000/tool.svg?label=uses&color=blue"
+REPOSITORY_COMMIT_API_URL="https://api.github.com/repos/Taylor000/tool/commits/master"
 
 # 默认全局配置
 DEFAULT_PORT="11156"
@@ -33,7 +35,9 @@ PUBLIC_BIND_IP="0.0.0.0"
 APT_INDEX_REFRESHED=0
 WIN10_LTSC_IMAGE_URL="https://dl.lamp.sh/vhd/zh-cn_windows10_ltsc.xz"
 WIN11_LTSC_IMAGE_URL="https://dl.lamp.sh/vhd/zh-cn_win11_ltsc.xz"
-PREFERRED_IPV4_CONFIG_DIR="/etc/taylor-tool"
+TOOL_STATE_DIR="/etc/taylor-tool"
+UPDATE_REVISION_FILE="${TOOL_STATE_DIR}/repository-revision"
+PREFERRED_IPV4_CONFIG_DIR="$TOOL_STATE_DIR"
 PREFERRED_IPV4_CONFIG_FILE="${PREFERRED_IPV4_CONFIG_DIR}/preferred-ipv4.conf"
 PREFERRED_IPV4_SERVICE="taylor-tool-preferred-ipv4.service"
 PREFERRED_IPV4_UNIT_FILE="/etc/systemd/system/${PREFERRED_IPV4_SERVICE}"
@@ -101,11 +105,56 @@ record_usage_count() {
     export TOOL_USAGE_COUNT="$USAGE_COUNT"
 }
 
+fetch_repository_revision() {
+    local response line
+
+    response=$(fetch_url "${REPOSITORY_COMMIT_API_URL}?t=$(date +%s)" 2>/dev/null) || return 1
+    while IFS= read -r line; do
+        if [[ $line =~ \"sha\"[[:space:]]*:[[:space:]]*\"([0-9a-f]{40})\" ]]; then
+            printf '%s\n' "${BASH_REMATCH[1]}"
+            return 0
+        fi
+    done <<< "$response"
+    return 1
+}
+
+read_saved_repository_revision() {
+    local revision=""
+
+    [[ -f $UPDATE_REVISION_FILE ]] || return 1
+    IFS= read -r revision < "$UPDATE_REVISION_FILE" || true
+    [[ $revision =~ ^[0-9a-f]{40}$ ]] || return 1
+    printf '%s\n' "$revision"
+}
+
+save_repository_revision() {
+    local revision=$1 revision_temp
+
+    [[ $revision =~ ^[0-9a-f]{40}$ ]] || return 1
+    revision_temp=$(mktemp /tmp/tool-revision.XXXXXX) || return 1
+    printf '%s\n' "$revision" > "$revision_temp"
+    if ! install -d -m 755 "$TOOL_STATE_DIR" ||
+       ! install -m 600 "$revision_temp" "$UPDATE_REVISION_FILE"; then
+        rm -f "$revision_temp"
+        return 1
+    fi
+    rm -f "$revision_temp"
+}
+
 check_script_update() {
-    local remote_script remote_version remote_min_version answer force_update=0
+    local remote_script remote_script_url remote_version remote_min_version
+    local remote_revision="" saved_revision="" update_reason=""
+    local version_update=0 revision_update=0
+
+    remote_revision=$(fetch_repository_revision 2>/dev/null || true)
+    if [[ $remote_revision =~ ^[0-9a-f]{40}$ ]]; then
+        remote_script_url="${REPOSITORY_RAW_URL}/${remote_revision}/tool.sh"
+    else
+        remote_script_url="${SCRIPT_RAW_URL}?t=$(date +%s)"
+    fi
 
     remote_script=$(mktemp /tmp/tool-update.XXXXXX) || return 0
-    if ! download_script "${SCRIPT_RAW_URL}?t=$(date +%s)" "$remote_script"; then
+    if ! download_script "$remote_script_url" "$remote_script"; then
         rm -f "$remote_script"
         warn "暂时无法检查脚本更新，将继续运行当前版本。"
         return 0
@@ -119,28 +168,39 @@ check_script_update() {
         return 0
     fi
 
-    if [[ $(printf '%s\n%s\n' "$SCRIPT_VERSION" "$remote_version" | sort -V | tail -n 1) != "$remote_version" ||
-          "$SCRIPT_VERSION" == "$remote_version" ]]; then
+    if [[ $(printf '%s\n%s\n' "$SCRIPT_VERSION" "$remote_version" | sort -V | tail -n 1) == "$remote_version" &&
+          "$SCRIPT_VERSION" != "$remote_version" ]]; then
+        version_update=1
+    fi
+
+    saved_revision=$(read_saved_repository_revision 2>/dev/null || true)
+    if [[ $remote_revision =~ ^[0-9a-f]{40}$ &&
+          $saved_revision =~ ^[0-9a-f]{40}$ &&
+          $remote_revision != "$saved_revision" ]]; then
+        revision_update=1
+    fi
+
+    if (( version_update == 0 && revision_update == 0 )); then
         rm -f "$remote_script"
+        if [[ $remote_revision =~ ^[0-9a-f]{40}$ &&
+              ! $saved_revision =~ ^[0-9a-f]{40}$ ]]; then
+            save_repository_revision "$remote_revision" ||
+                warn "无法保存脚本修订号；下次仍会重新检查更新。"
+        fi
         return 0
     fi
 
+    if (( version_update == 1 )); then
+        update_reason="版本 ${SCRIPT_VERSION} → ${remote_version}"
+    else
+        update_reason="仓库脚本已更新 (${saved_revision:0:7} → ${remote_revision:0:7})"
+    fi
     if [[ -n "$remote_min_version" &&
           $(printf '%s\n%s\n' "$SCRIPT_VERSION" "$remote_min_version" | sort -V | head -n 1) == "$SCRIPT_VERSION" &&
           "$SCRIPT_VERSION" != "$remote_min_version" ]]; then
-        force_update=1
+        warn "当前版本低于最低支持版本 v${remote_min_version}。"
     fi
-
-    if (( force_update == 1 )); then
-        error "当前版本 v${SCRIPT_VERSION} 低于最低支持版本 v${remote_min_version}，必须更新后才能继续。"
-    else
-        warn "发现新版本：${SCRIPT_VERSION} → ${remote_version}"
-        read -r -p "是否立即更新并重新启动？(Y/n, 默认Y): " answer
-        if [[ $answer =~ ^[Nn]$ ]]; then
-            rm -f "$remote_script"
-            return 0
-        fi
-    fi
+    warn "检测到${update_reason}，正在强制更新主脚本..."
 
     if ! install -m 755 "$remote_script" "$CURRENT_SCRIPT"; then
         error "脚本更新失败，当前版本未被替换。"
@@ -148,6 +208,11 @@ check_script_update() {
         return 0
     fi
     rm -f "$remote_script"
+    if [[ $remote_revision =~ ^[0-9a-f]{40}$ ]] &&
+       ! save_repository_revision "$remote_revision"; then
+        warn "主脚本已更新，但无法保存仓库修订号；请重新运行 tool。"
+        return 0
+    fi
     info "脚本已更新到 ${remote_version}，正在重新启动..."
     exec "$CURRENT_SCRIPT"
 }
@@ -1262,6 +1327,8 @@ while true; do
             read -r -p "确定要删除本脚本及快捷命令吗？(y/n): " del_confirm
             if [[ $del_confirm == [yY] ]]; then
                 remove_preferred_ipv4_persistence 1
+                rm -f "$UPDATE_REVISION_FILE"
+                rmdir "$TOOL_STATE_DIR" 2>/dev/null || true
                 rm -f "/usr/local/bin/${SHORTCUT_CMD}"
                 echo -e "${GREEN}快捷命令已删除。${NC}"
                 rm -f "$0"
