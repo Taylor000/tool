@@ -1,11 +1,14 @@
 #!/bin/bash
 
+set -o pipefail
+
 red='\033[0;31m'
 green='\033[0;32m'
 yellow='\033[0;33m'
 plain='\033[0m'
 
 cur_dir=$(pwd)
+installer_url="https://raw.githubusercontent.com/Taylor000/tool/master/vendor/scripts/wyx2685-v2node-install.sh"
 
 # check root
 [[ $EUID -ne 0 ]] && echo -e "${red}错误：${plain} 必须使用root用户运行此脚本！\n" && exit 1
@@ -106,9 +109,30 @@ before_show_menu() {
     show_menu
 }
 
+run_installer() {
+    local installer_file status
+
+    installer_file=$(mktemp /tmp/v2node-installer.XXXXXX) || return 1
+    if ! curl --fail --location --silent --show-error --retry 3 \
+        --output "$installer_file" "$installer_url"; then
+        echo -e "${red}v2node 安装脚本下载失败。${plain}" >&2
+        rm -f "$installer_file"
+        return 1
+    fi
+    if ! bash -n "$installer_file"; then
+        echo -e "${red}下载的 v2node 安装脚本语法无效。${plain}" >&2
+        rm -f "$installer_file"
+        return 1
+    fi
+
+    bash "$installer_file" "$@"
+    status=$?
+    rm -f "$installer_file"
+    return "$status"
+}
+
 install() {
-    bash <(curl -Ls https://raw.githubusercontent.com/Taylor000/tool/master/vendor/scripts/wyx2685-v2node-install.sh)
-    if [[ $? == 0 ]]; then
+    if run_installer; then
         if [[ $# == 0 ]]; then
             start
         else
@@ -123,8 +147,7 @@ update() {
     else
         version=$2
     fi
-    bash <(curl -Ls https://raw.githubusercontent.com/Taylor000/tool/master/vendor/scripts/wyx2685-v2node-install.sh) $version
-    if [[ $? == 0 ]]; then
+    if run_installer "$version"; then
         echo -e "${green}更新完成，已自动重启 v2node，请使用 v2node log 查看运行日志${plain}"
         exit
     fi

@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -o pipefail
+
 red='\033[0;31m'
 green='\033[0;32m'
 yellow='\033[0;33m'
@@ -115,29 +117,35 @@ install_base() {
     need_install_apt() {
         local packages=("$@")
         local missing=()
-        
-        # 批量检查已安装的包
-        local installed_list=$(dpkg-query -W -f='${Package}\n' 2>/dev/null | sort)
-        
+        local p
+
         for p in "${packages[@]}"; do
-            if ! echo "$installed_list" | grep -q "^${p}$"; then
+            if ! dpkg-query -W -f='${db:Status-Abbrev}' "$p" 2>/dev/null | grep -q '^ii'; then
                 missing+=("$p")
             fi
         done
         
         if [[ ${#missing[@]} -gt 0 ]]; then
             echo "安装缺失的包: ${missing[*]}"
-            apt-get update -y >/dev/null 2>&1
-            DEBIAN_FRONTEND=noninteractive apt-get install -y "${missing[@]}" >/dev/null 2>&1
+            if ! apt-get update; then
+                echo -e "${red}APT 软件包索引更新失败，请检查软件源和网络。${plain}" >&2
+                return 1
+            fi
+            if ! DEBIAN_FRONTEND=noninteractive apt-get install -y "${missing[@]}"; then
+                echo -e "${red}依赖安装失败: ${missing[*]}${plain}" >&2
+                return 1
+            fi
         fi
     }
 
     need_install_yum() {
         local packages=("$@")
         local missing=()
+        local p
         
         # 批量检查已安装的包
-        local installed_list=$(rpm -qa --qf '%{NAME}\n' 2>/dev/null | sort)
+        local installed_list
+        installed_list=$(rpm -qa --qf '%{NAME}\n' 2>/dev/null | sort)
         
         for p in "${packages[@]}"; do
             if ! echo "$installed_list" | grep -q "^${p}$"; then
@@ -147,16 +155,21 @@ install_base() {
         
         if [[ ${#missing[@]} -gt 0 ]]; then
             echo "安装缺失的包: ${missing[*]}"
-            yum install -y "${missing[@]}" >/dev/null 2>&1
+            if ! yum install -y "${missing[@]}"; then
+                echo -e "${red}依赖安装失败: ${missing[*]}${plain}" >&2
+                return 1
+            fi
         fi
     }
 
     need_install_apk() {
         local packages=("$@")
         local missing=()
+        local p
         
         # 批量检查已安装的包
-        local installed_list=$(apk info 2>/dev/null | sort)
+        local installed_list
+        installed_list=$(apk info 2>/dev/null | sort)
         
         for p in "${packages[@]}"; do
             if ! echo "$installed_list" | grep -q "^${p}$"; then
@@ -166,7 +179,10 @@ install_base() {
         
         if [[ ${#missing[@]} -gt 0 ]]; then
             echo "安装缺失的包: ${missing[*]}"
-            apk add --no-cache "${missing[@]}" >/dev/null 2>&1
+            if ! apk add --no-cache "${missing[@]}"; then
+                echo -e "${red}依赖安装失败: ${missing[*]}${plain}" >&2
+                return 1
+            fi
         fi
     }
 
@@ -175,26 +191,65 @@ install_base() {
         # 检查并安装 epel-release
         if ! rpm -q epel-release >/dev/null 2>&1; then
             echo "安装 EPEL 源..."
-            yum install -y epel-release >/dev/null 2>&1
+            yum install -y epel-release || return 1
         fi
-        need_install_yum wget curl unzip tar cronie socat ca-certificates pv
+        need_install_yum wget curl unzip tar cronie socat ca-certificates || return 1
         update-ca-trust force-enable >/dev/null 2>&1 || true
     elif [[ x"${release}" == x"alpine" ]]; then
-        need_install_apk wget curl unzip tar socat ca-certificates pv
+        need_install_apk wget curl unzip tar socat ca-certificates || return 1
         update-ca-certificates >/dev/null 2>&1 || true
     elif [[ x"${release}" == x"debian" ]]; then
-        need_install_apt wget curl unzip tar cron socat ca-certificates pv
+        need_install_apt wget curl unzip tar cron socat ca-certificates || return 1
         update-ca-certificates >/dev/null 2>&1 || true
     elif [[ x"${release}" == x"ubuntu" ]]; then
-        need_install_apt wget curl unzip tar cron socat ca-certificates pv
+        need_install_apt wget curl unzip tar cron socat ca-certificates || return 1
         update-ca-certificates >/dev/null 2>&1 || true
     elif [[ x"${release}" == x"arch" ]]; then
         echo "更新包数据库..."
-        pacman -Sy --noconfirm >/dev/null 2>&1
+        pacman -Sy --noconfirm || return 1
         # --needed 会跳过已安装的包，非常高效
         echo "安装必需的包..."
-        pacman -S --noconfirm --needed wget curl unzip tar cronie socat ca-certificates pv >/dev/null 2>&1
+        pacman -S --noconfirm --needed wget curl unzip tar cronie socat ca-certificates || return 1
+    else
+        echo -e "${red}不支持当前系统，无法安装依赖。${plain}" >&2
+        return 1
     fi
+
+    local required_command
+    for required_command in curl unzip tar socat; do
+        if ! command -v "$required_command" >/dev/null 2>&1; then
+            echo -e "${red}依赖安装完成后仍找不到命令: ${required_command}${plain}" >&2
+            return 1
+        fi
+    done
+}
+
+download_v2node_archive() {
+    local url="$1"
+    local destination="$2"
+    local partial="${destination}.part"
+
+    rm -f "$partial" "$destination"
+    if ! curl --fail --location --show-error --progress-bar \
+        --connect-timeout 15 --max-time 900 --retry 3 --retry-delay 2 \
+        --output "$partial" "$url"; then
+        echo -e "${red}下载 v2node 失败: ${url}${plain}" >&2
+        rm -f "$partial"
+        return 1
+    fi
+
+    if [[ ! -s "$partial" ]]; then
+        echo -e "${red}下载的 v2node 压缩包为空。${plain}" >&2
+        rm -f "$partial"
+        return 1
+    fi
+    if ! unzip -tq "$partial" >/dev/null; then
+        echo -e "${red}下载结果不是有效的 v2node ZIP 压缩包。${plain}" >&2
+        rm -f "$partial"
+        return 1
+    fi
+
+    mv -f "$partial" "$destination"
 }
 
 # 0: running, 1: not running, 2: not installed
@@ -249,9 +304,8 @@ EOF
             systemctl restart v2node
         fi
         sleep 2
-        check_status
         echo -e ""
-        if [[ $? == 0 ]]; then
+        if check_status; then
             echo -e "${green}v2node 重启成功${plain}"
         else
             echo -e "${red}v2node 可能启动失败，请使用 v2node log 查看日志信息${plain}"
@@ -259,36 +313,81 @@ EOF
 }
 
 install_v2node() {
-    local version_param="$1"
-    if [[ -e /usr/local/v2node/ ]]; then
-        rm -rf /usr/local/v2node/
-    fi
+    local version_param="${1:-}"
+    local release_tag url work_dir archive extract_dir payload_dir
+    local install_dir="/usr/local/v2node"
+    local backup_dir="/usr/local/v2node.backup.$$"
 
-    mkdir /usr/local/v2node/ -p
-    cd /usr/local/v2node/
-
-    if  [[ -z "$version_param" ]] ; then
+    if [[ -z "$version_param" ]]; then
         last_version="Taylor000/tool latest"
         echo -e "${green}使用 Taylor000/tool latest release 中的 v2node，开始安装...${plain}"
         url="${vendor_release_url}/v2node-linux-${arch}.zip"
-        curl -sL "$url" | pv -s 30M -W -N "下载进度" > /usr/local/v2node/v2node-linux.zip
-        if [[ $? -ne 0 ]]; then
-            echo -e "${red}下载 v2node 失败，请确保 Taylor000/tool latest release 已上传 v2node-linux-${arch}.zip${plain}"
-            exit 1
-        fi
     else
-    last_version=$version_param
-        url="${vendor_release_url}/v2node-linux-${arch}.zip"
-        curl -sL "$url" | pv -s 30M -W -N "下载进度" > /usr/local/v2node/v2node-linux.zip
-        if [[ $? -ne 0 ]]; then
-            echo -e "${red}下载 v2node 失败，请确保 Taylor000/tool latest release 已上传 v2node-linux-${arch}.zip${plain}"
-            exit 1
-        fi
+        release_tag="$version_param"
+        [[ "$release_tag" == v* ]] || release_tag="v${release_tag}"
+        last_version="$release_tag"
+        echo -e "${green}使用 Taylor000/tool ${release_tag} release 中的 v2node，开始安装...${plain}"
+        url="https://github.com/Taylor000/tool/releases/download/${release_tag}/v2node-linux-${arch}.zip"
     fi
 
-    unzip v2node-linux.zip
-    rm v2node-linux.zip -f
-    chmod +x v2node
+    work_dir=$(mktemp -d /tmp/v2node-install.XXXXXX) || {
+        echo -e "${red}无法创建临时安装目录。${plain}" >&2
+        return 1
+    }
+    archive="${work_dir}/v2node-linux.zip"
+    extract_dir="${work_dir}/payload"
+    mkdir -p "$extract_dir"
+
+    if ! download_v2node_archive "$url" "$archive"; then
+        rm -rf "$work_dir"
+        return 1
+    fi
+    if ! unzip -q "$archive" -d "$extract_dir"; then
+        echo -e "${red}解压 v2node 失败，原有安装未被修改。${plain}" >&2
+        rm -rf "$work_dir"
+        return 1
+    fi
+
+    payload_dir=$(dirname "$(find "$extract_dir" -type f -name v2node -print -quit)")
+    if [[ -z "$payload_dir" || "$payload_dir" == "." ]]; then
+        echo -e "${red}压缩包中缺少 v2node 可执行文件，原有安装未被修改。${plain}" >&2
+        rm -rf "$work_dir"
+        return 1
+    fi
+    local required_file
+    for required_file in v2node geoip.dat geosite.dat; do
+        if [[ ! -f "${payload_dir}/${required_file}" ]]; then
+            echo -e "${red}压缩包缺少文件: ${required_file}，原有安装未被修改。${plain}" >&2
+            rm -rf "$work_dir"
+            return 1
+        fi
+    done
+
+    rm -rf "$backup_dir"
+    if [[ -e "$install_dir" ]]; then
+        if ! mv "$install_dir" "$backup_dir"; then
+            echo -e "${red}无法备份现有 v2node 安装。${plain}" >&2
+            rm -rf "$work_dir"
+            return 1
+        fi
+    fi
+    if ! mkdir -p "$install_dir" || ! cp -a "${payload_dir}/." "${install_dir}/"; then
+        echo -e "${red}写入 v2node 安装目录失败，正在恢复旧版本。${plain}" >&2
+        rm -rf "$install_dir"
+        [[ -e "$backup_dir" ]] && mv "$backup_dir" "$install_dir"
+        rm -rf "$work_dir"
+        return 1
+    fi
+    if ! chmod +x "${install_dir}/v2node"; then
+        echo -e "${red}无法设置 v2node 执行权限，正在恢复旧版本。${plain}" >&2
+        rm -rf "$install_dir"
+        [[ -e "$backup_dir" ]] && mv "$backup_dir" "$install_dir"
+        rm -rf "$work_dir"
+        return 1
+    fi
+    rm -rf "$backup_dir" "$work_dir"
+    cd "$install_dir" || return 1
+
     mkdir /etc/v2node/ -p
     cp geoip.dat /etc/v2node/
     cp geosite.dat /etc/v2node/
@@ -351,7 +450,6 @@ EOF
             echo -e "${green}已根据参数生成 /etc/v2node/config.json${plain}"
             first_install=false
         else
-            cp config.json /etc/v2node/
             first_install=true
         fi
     else
@@ -361,9 +459,8 @@ EOF
             systemctl start v2node
         fi
         sleep 2
-        check_status
         echo -e ""
-        if [[ $? == 0 ]]; then
+        if check_status; then
             echo -e "${green}v2node 重启成功${plain}"
         else
             echo -e "${red}v2node 可能启动失败，请使用 v2node log 查看日志信息${plain}"
@@ -371,11 +468,24 @@ EOF
         first_install=false
     fi
 
+    local management_script
+    management_script=$(mktemp /tmp/v2node-manager.XXXXXX) || return 1
+    if ! curl --fail --location --silent --show-error --retry 3 \
+        --output "$management_script" \
+        https://raw.githubusercontent.com/Taylor000/tool/master/vendor/scripts/v2node/v2node.sh; then
+        echo -e "${red}v2node 管理脚本下载失败。${plain}" >&2
+        rm -f "$management_script"
+        return 1
+    fi
+    if ! bash -n "$management_script"; then
+        echo -e "${red}下载的 v2node 管理脚本语法无效。${plain}" >&2
+        rm -f "$management_script"
+        return 1
+    fi
+    chmod 755 "$management_script"
+    mv -f "$management_script" /usr/bin/v2node
 
-    curl -o /usr/bin/v2node -Ls https://raw.githubusercontent.com/Taylor000/tool/master/vendor/scripts/v2node/v2node.sh
-    chmod +x /usr/bin/v2node
-
-    cd $cur_dir
+    cd "$cur_dir" || return 1
     rm -f install.sh
     echo "------------------------------------------"
     echo -e "管理脚本使用方法: "
@@ -417,5 +527,11 @@ EOF
 
 parse_args "$@"
 echo -e "${green}开始安装${plain}"
-install_base
-install_v2node "$VERSION_ARG"
+if ! install_base; then
+    echo -e "${red}基础依赖安装失败，v2node 安装已停止。${plain}" >&2
+    exit 1
+fi
+if ! install_v2node "$VERSION_ARG"; then
+    echo -e "${red}v2node 安装失败。${plain}" >&2
+    exit 1
+fi
