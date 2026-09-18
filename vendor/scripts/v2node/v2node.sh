@@ -43,8 +43,8 @@ elif [[ $arch == "aarch64" || $arch == "arm64" ]]; then
 elif [[ $arch == "s390x" ]]; then
     arch="s390x"
 else
-    arch="64"
-    echo -e "${red}检测架构失败，使用默认架构: ${arch}${plain}"
+    echo -e "${red}不支持的系统架构: $(uname -m)${plain}" >&2
+    exit 1
 fi
 
 if [ "$(getconf WORD_BIT)" != '32' ] && [ "$(getconf LONG_BIT)" != '64' ] ; then
@@ -141,13 +141,8 @@ install() {
 }
 
 update() {
-    if [[ $# == 0 ]]; then
-        echo && echo -n -e "输入指定版本(默认最新版): " && read version
-    else
-        version=$2
-    fi
-    if run_installer "$version"; then
-        echo -e "${green}更新完成，已自动重启 v2node，请使用 v2node log 查看运行日志${plain}"
+    if run_installer; then
+        echo -e "${green}已重新安装 Taylor000 自用固定版本并自动重启，请使用 v2node log 查看运行日志${plain}"
         exit
     fi
 
@@ -524,8 +519,7 @@ show_usage() {
     echo "v2node log          - 查看 v2node 日志"
     echo "v2node x25519       - 生成 x25519 密钥"
     echo "v2node generate     - 生成 v2node 配置文件"
-    echo "v2node update       - 更新 v2node"
-    echo "v2node update x.x.x - 安装 v2node 指定版本"
+    echo "v2node update       - 重新安装 Taylor000 自用固定版本"
     echo "v2node install      - 安装 v2node"
     echo "v2node uninstall    - 卸载 v2node"
     echo "v2node version      - 查看 v2node 版本"
@@ -535,7 +529,7 @@ show_usage() {
 show_menu() {
     echo -e "
   ${green}v2node 后端管理脚本，${plain}${red}不适用于docker${plain}
---- https://github.com/wyx2685/v2node ---
+--- Taylor000 自用备份版（资源来自 Taylor000/tool）---
   ${green}0.${plain} 修改配置
 ————————————————
   ${green}1.${plain} 安装 v2node

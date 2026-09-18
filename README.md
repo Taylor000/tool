@@ -3,7 +3,7 @@
 </div>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v2.2.5-FDEBF3?style=flat-square&labelColor=FFF9F3" alt="Version 2.2.5" />
+  <img src="https://img.shields.io/badge/version-v2.2.6-FDEBF3?style=flat-square&labelColor=FFF9F3" alt="Version 2.2.6" />
   <img src="https://img.shields.io/badge/Shell-EAF7F1?style=flat-square&logo=gnu-bash&logoColor=4F6F65" alt="Shell" />
   <img src="https://img.shields.io/badge/Linux-FFF2CF?style=flat-square&logo=linux&logoColor=75664A" alt="Linux" />
   <img src="https://img.shields.io/badge/IPv4-EAF2FF?style=flat-square&logo=icloud&logoColor=536684" alt="IPv4" />
@@ -28,7 +28,7 @@ tool
              一个人的脚本百宝箱
      Author: https://github.com/Taylor000
      快捷启动命令: tool
-     当前版本: v2.2.5  累计调用: 暂不可用
+     当前版本: v2.2.6  累计调用: 暂不可用
 ==================================================
  1. 显示系统基本信息与性能测试
  2. 修改系统 root 密码
@@ -47,9 +47,11 @@ tool
  15. 安装 Komari 监控探针 (Docker版)
  16. 安装 XrayR 官方版 (v0.9.4，已停止维护)
  17. 安装 XrayR 后端对接 (柚子备份版，需配置)
- 18. 安装 v2node 后端对接 (官方版)
+ 18. 安装 v2node 后端对接 (Taylor000 自用备份版)
 --------------------------------------------------
  19. 卸载并删除本脚本
  0. 退出脚本 (或双击回车)
 ==================================================
 ```
+
+v2node 菜单使用 `Taylor000/tool` 的固定归档资源，不访问原项目 Release；下载后会同时检查 ZIP 完整性、所需文件和 SHA-256。

@@ -4,7 +4,9 @@ red='\033[0;31m'
 green='\033[0;32m'
 yellow='\033[0;33m'
 plain='\033[0m'
-vendor_release_url="https://github.com/Taylor000/tool/releases/latest/download"
+vendor_release_repository="Taylor000/tool"
+vendor_release_tag="v2.1.11"
+vendor_release_url="https://github.com/${vendor_release_repository}/releases/download/${vendor_release_tag}"
 APT_LISTS_DIR="${APT_LISTS_DIR:-/var/lib/apt/lists}"
 BULLSEYE_SECURITY_SNAPSHOT="20260831T211304Z"
 
@@ -54,7 +56,8 @@ parse_args() {
             --api-key)
                 API_KEY_ARG="$2"; shift 2 ;;
             -h|--help)
-                echo "用法: $0 [版本号] [--api-host URL] [--node-id ID] [--api-key KEY]"
+                echo "用法: $0 [--api-host URL] [--node-id ID] [--api-key KEY]"
+                echo "安装源: Taylor000/tool ${vendor_release_tag} 固定归档资源"
                 exit 0 ;;
             --*)
                 echo "未知参数: $1"; exit 1 ;;
@@ -78,8 +81,8 @@ elif [[ $arch == "aarch64" || $arch == "arm64" ]]; then
 elif [[ $arch == "s390x" ]]; then
     arch="s390x"
 else
-    arch="64"
-    echo -e "${red}检测架构失败，使用默认架构: ${arch}${plain}"
+    echo -e "${red}不支持的系统架构: $(uname -m)${plain}" >&2
+    exit 1
 fi
 
 if [ "$(getconf WORD_BIT)" != '32' ] && [ "$(getconf LONG_BIT)" != '64' ] ; then
@@ -289,7 +292,7 @@ install_base() {
     fi
 
     local required_command
-    for required_command in curl unzip tar socat; do
+    for required_command in curl unzip tar socat sha256sum; do
         if ! command -v "$required_command" >/dev/null 2>&1; then
             echo -e "${red}依赖安装完成后仍找不到命令: ${required_command}${plain}" >&2
             return 1
@@ -300,7 +303,9 @@ install_base() {
 download_v2node_archive() {
     local url="$1"
     local destination="$2"
+    local expected_sha256="$3"
     local partial="${destination}.part"
+    local actual_sha256
 
     rm -f "$partial" "$destination"
     if ! curl --fail --location --show-error --progress-bar \
@@ -321,6 +326,21 @@ download_v2node_archive() {
         rm -f "$partial"
         return 1
     fi
+
+    if ! command -v sha256sum >/dev/null 2>&1; then
+        echo -e "${red}系统缺少 sha256sum，无法校验 v2node 安装包。${plain}" >&2
+        rm -f "$partial"
+        return 1
+    fi
+    actual_sha256=$(sha256sum "$partial" | awk '{print $1}')
+    if [[ "$actual_sha256" != "$expected_sha256" ]]; then
+        echo -e "${red}v2node 安装包 SHA-256 校验失败，已停止安装。${plain}" >&2
+        echo -e "${red}期望: ${expected_sha256}${plain}" >&2
+        echo -e "${red}实际: ${actual_sha256}${plain}" >&2
+        rm -f "$partial"
+        return 1
+    fi
+    echo -e "${green}v2node 安装包 SHA-256 校验通过。${plain}"
 
     mv -f "$partial" "$destination"
 }
@@ -387,21 +407,28 @@ EOF
 
 install_v2node() {
     local version_param="${1:-}"
-    local release_tag url work_dir archive extract_dir payload_dir
+    local url work_dir archive extract_dir payload_dir expected_sha256
     local install_dir="/usr/local/v2node"
     local backup_dir="/usr/local/v2node.backup.$$"
 
-    if [[ -z "$version_param" ]]; then
-        last_version="Taylor000/tool latest"
-        echo -e "${green}使用 Taylor000/tool latest release 中的 v2node，开始安装...${plain}"
-        url="${vendor_release_url}/v2node-linux-${arch}.zip"
-    else
-        release_tag="$version_param"
-        [[ "$release_tag" == v* ]] || release_tag="v${release_tag}"
-        last_version="$release_tag"
-        echo -e "${green}使用 Taylor000/tool ${release_tag} release 中的 v2node，开始安装...${plain}"
-        url="https://github.com/Taylor000/tool/releases/download/${release_tag}/v2node-linux-${arch}.zip"
+    if [[ -n "$version_param" && "$version_param" != "$vendor_release_tag" && "v${version_param}" != "$vendor_release_tag" ]]; then
+        echo -e "${red}自用备份版仅提供固定归档资源 ${vendor_release_tag}。${plain}" >&2
+        return 1
     fi
+
+    case "$arch" in
+        64) expected_sha256="18ec6fec66bd852a27debd6a91086acb7b9c40ec813b364f98962859c2d2d6a0" ;;
+        arm64-v8a) expected_sha256="f5680efd48ffcf2b6707e96be64b9ae6cd24be99ad816e5df307662c5a8aa678" ;;
+        s390x) expected_sha256="4c954b55fd724644293b90fff2cd1274b3bb285ef93e866b4466b16eff50ba29" ;;
+        *)
+            echo -e "${red}没有 ${arch} 架构的固定校验值，已停止安装。${plain}" >&2
+            return 1
+            ;;
+    esac
+
+    last_version="Taylor000 自用备份 (${vendor_release_tag})"
+    echo -e "${green}使用 ${vendor_release_repository} ${vendor_release_tag} 中的固定 v2node 资源，开始安装...${plain}"
+    url="${vendor_release_url}/v2node-linux-${arch}.zip"
 
     work_dir=$(mktemp -d /tmp/v2node-install.XXXXXX) || {
         echo -e "${red}无法创建临时安装目录。${plain}" >&2
@@ -411,7 +438,7 @@ install_v2node() {
     extract_dir="${work_dir}/payload"
     mkdir -p "$extract_dir"
 
-    if ! download_v2node_archive "$url" "$archive"; then
+    if ! download_v2node_archive "$url" "$archive" "$expected_sha256"; then
         rm -rf "$work_dir"
         return 1
     fi
@@ -572,8 +599,7 @@ EOF
     echo "v2node disable      - 取消 v2node 开机自启"
     echo "v2node log          - 查看 v2node 日志"
     echo "v2node generate     - 生成 v2node 配置文件"
-    echo "v2node update       - 更新 v2node"
-    echo "v2node update x.x.x - 更新 v2node 指定版本"
+    echo "v2node update       - 重新安装 Taylor000 自用固定版本"
     echo "v2node install      - 安装 v2node"
     echo "v2node uninstall    - 卸载 v2node"
     echo "v2node version      - 查看 v2node 版本"

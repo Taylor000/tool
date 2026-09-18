@@ -19,8 +19,8 @@ NC='\033[0m'
 AUTHOR_GITHUB="https://github.com/Taylor000"
 SCRIPT_NAME="一个人的脚本百宝箱"
 SHORTCUT_CMD="tool"
-SCRIPT_VERSION="2.2.5"
-MIN_SUPPORTED_VERSION="2.2.5"
+SCRIPT_VERSION="2.2.6"
+MIN_SUPPORTED_VERSION="2.2.6"
 SCRIPT_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool/master/tool.sh"
 REPOSITORY_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool"
 VENDOR_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool/master/vendor"
@@ -991,7 +991,7 @@ show_menu() {
     echo -e "${YELLOW} 15.${NC} 安装 Komari 监控探针 (Docker版)"
     echo -e "${YELLOW} 16.${NC} 安装 XrayR 官方版 (v0.9.4，已停止维护)"
     echo -e "${YELLOW} 17.${NC} 安装 XrayR 后端对接 (柚子备份版，需配置)"
-    echo -e "${YELLOW} 18.${NC} 安装 v2node 后端对接 (官方版)"
+    echo -e "${YELLOW} 18.${NC} 安装 v2node 后端对接 (Taylor000 自用备份版)"
     echo -e "${BLUE}--------------------------------------------------${NC}"
     echo -e "${YELLOW} 19.${NC} ${RED}卸载并删除本脚本${NC}"
     echo -e "${RED} 0.${NC} 退出脚本 (或双击回车)${NC}"
@@ -1313,6 +1313,7 @@ while true; do
             ;;
         18)
             check_installed "v2node" "v2node" "v2node" || { pause_menu; continue; }
+            info "安装来源: Taylor000/tool 自有 Release（固定归档资源）"
             read -r -p "面板 API 地址 (例如 https://example.com/，留空则只安装程序): " v2_api_host
             read -r -p "节点 ID (留空则只安装程序): " v2_node_id
             read -r -p "节点通讯密钥 (留空则只安装程序): " v2_api_key
