@@ -1,7 +1,5 @@
 #!/bin/bash
 
-set -o pipefail
-
 red='\033[0;31m'
 green='\033[0;32m'
 yellow='\033[0;33m'
@@ -517,7 +515,7 @@ EOF
             node_id=${node_id:-1}
             read -rp "节点通讯密钥: " api_key
 
-            # 生成配置文件（覆盖可能从包中复制的模板）
+            # 根据交互输入生成配置文件
             generate_v2node_config "$api_host" "$node_id" "$api_key"
         else
             echo "${green}已跳过自动生成配置。如需后续生成，可执行: v2node generate${plain}"
