@@ -19,8 +19,8 @@ NC='\033[0m'
 AUTHOR_GITHUB="https://github.com/Taylor000"
 SCRIPT_NAME="一个人的脚本百宝箱"
 SHORTCUT_CMD="tool"
-SCRIPT_VERSION="2.2.10"
-MIN_SUPPORTED_VERSION="2.2.10"
+SCRIPT_VERSION="2.2.11"
+MIN_SUPPORTED_VERSION="2.2.11"
 SCRIPT_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool/master/tool.sh"
 REPOSITORY_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool"
 VENDOR_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool/master/vendor"
@@ -272,17 +272,19 @@ is_debian_11() {
 }
 
 install_debian_11_packages() {
-    local temp_dir sources_file status=1
+    local temp_dir sources_file status=1 source_mode source_label
     local -a apt_options packages=("$@")
+    local -a source_modes=(archive_https archive_http snapshot_https snapshot_http)
+    local -a source_labels=(
+        "Debian Archive HTTPS"
+        "Debian Archive HTTP"
+        "Debian Snapshot HTTPS"
+        "Debian Snapshot HTTP"
+    )
 
     temp_dir=$(mktemp -d /tmp/tool-bullseye-apt.XXXXXX) || return 1
+    chmod 755 "$temp_dir"
     sources_file="${temp_dir}/sources.list"
-    mkdir -p "${temp_dir}/lists/partial" "${temp_dir}/archives/partial"
-    cat > "$sources_file" <<EOF
-deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/${DEBIAN_11_SNAPSHOT}/ bullseye main
-deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/${DEBIAN_11_SNAPSHOT}/ bullseye-updates main
-deb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/${DEBIAN_11_SNAPSHOT}/ bullseye-security main
-EOF
 
     apt_options=(
         -o "Dir::Etc::sourcelist=${sources_file}"
@@ -291,19 +293,57 @@ EOF
         -o "Dir::Cache::archives=${temp_dir}/archives"
         -o Acquire::Check-Valid-Until=false
         -o Acquire::ForceIPv4=true
-        -o Acquire::Retries=3
+        -o Acquire::Retries=0
+        -o Acquire::http::Timeout=12
+        -o Acquire::https::Timeout=12
         -o Acquire::http::No-Cache=true
         -o Acquire::https::No-Cache=true
     )
 
-    warn "Debian 11 使用固定软件仓库快照安装：${packages[*]}"
-    if apt-get "${apt_options[@]}" update &&
-       DEBIAN_FRONTEND=noninteractive apt-get "${apt_options[@]}" install -y "${packages[@]}"; then
-        status=0
-        APT_INDEX_REFRESHED=1
-    else
-        error "Debian 11 固定软件仓库安装失败。"
-    fi
+    warn "Debian 11 使用固定软件仓库安装：${packages[*]}"
+    for source_mode in "${!source_modes[@]}"; do
+        source_label=${source_labels[source_mode]}
+        rm -rf "${temp_dir:?}/lists" "${temp_dir:?}/archives"
+        mkdir -p "${temp_dir}/lists/partial" "${temp_dir}/archives/partial"
+
+        case ${source_modes[source_mode]} in
+            archive_https)
+                printf '%s\n' \
+                    'deb [check-valid-until=no] https://archive.debian.org/debian bullseye main' \
+                    > "$sources_file"
+                ;;
+            archive_http)
+                printf '%s\n' \
+                    'deb [check-valid-until=no] http://archive.debian.org/debian bullseye main' \
+                    > "$sources_file"
+                ;;
+            snapshot_https)
+                printf '%s\n' \
+                    "deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/${DEBIAN_11_SNAPSHOT}/ bullseye main" \
+                    "deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/${DEBIAN_11_SNAPSHOT}/ bullseye-updates main" \
+                    "deb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/${DEBIAN_11_SNAPSHOT}/ bullseye-security main" \
+                    > "$sources_file"
+                ;;
+            snapshot_http)
+                printf '%s\n' \
+                    "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/${DEBIAN_11_SNAPSHOT}/ bullseye main" \
+                    "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/${DEBIAN_11_SNAPSHOT}/ bullseye-updates main" \
+                    "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/${DEBIAN_11_SNAPSHOT}/ bullseye-security main" \
+                    > "$sources_file"
+                ;;
+        esac
+
+        warn "正在尝试 ${source_label}..."
+        if apt-get "${apt_options[@]}" update &&
+           DEBIAN_FRONTEND=noninteractive apt-get "${apt_options[@]}" install -y "${packages[@]}"; then
+            status=0
+            APT_INDEX_REFRESHED=1
+            break
+        fi
+        warn "${source_label} 不可用，自动切换下一个软件源。"
+    done
+
+    (( status == 0 )) || error "Debian 11 备用软件源均安装失败。"
 
     rm -rf "$temp_dir"
     return "$status"
@@ -369,11 +409,47 @@ download_file() {
     fi
 }
 
+download_github_api_file() {
+    local raw_url=$1 destination=$2 clean_url remainder revision file_path api_url status
+    local raw_prefix="https://raw.githubusercontent.com/Taylor000/tool/"
+
+    clean_url=${raw_url%%\?*}
+    [[ $clean_url == "$raw_prefix"* ]] || return 1
+    remainder=${clean_url#"$raw_prefix"}
+    revision=${remainder%%/*}
+    file_path=${remainder#*/}
+    [[ -n $revision && -n $file_path && $file_path != "$remainder" ]] || return 1
+
+    api_url="https://api.github.com/repos/Taylor000/tool/contents/${file_path}?ref=${revision}"
+    rm -f "$destination"
+    if command_exists curl; then
+        curl --fail --location --silent --show-error \
+            --connect-timeout 15 --max-time 60 --retry 2 \
+            -H 'Accept: application/vnd.github.raw+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "$api_url" -o "$destination"
+        status=$?
+    elif command_exists wget; then
+        wget --https-only --timeout=30 --tries=2 \
+            --header='Accept: application/vnd.github.raw+json' \
+            --header='X-GitHub-Api-Version: 2022-11-28' \
+            -O "$destination" "$api_url"
+        status=$?
+    else
+        return 1
+    fi
+
+    (( status == 0 )) && [[ -s $destination ]]
+}
+
 download_script() {
     local url=$1
     local destination=$2
 
-    download_file "$url" "$destination" || return 1
+    if ! download_file "$url" "$destination"; then
+        warn "GitHub Raw 下载失败，正在尝试 GitHub API 备用通道..."
+        download_github_api_file "$url" "$destination" || return 1
+    fi
     if head -c 512 "$destination" | grep -Eiq '<!doctype html|<html|under maintenance|404 not found'; then
         error "下载结果不是有效脚本，可能是错误页面：$url"
         rm -f "$destination"
@@ -1046,7 +1122,7 @@ check_installed() {
 # 精简页眉显示
 show_mini_header() {
     echo -e "\n${BLUE}==================================================${NC}"
-    echo -e "${GREEN}             ${SCRIPT_NAME}                  ${NC}"
+    echo -e "${GREEN}             ${SCRIPT_NAME}${NC}"
     echo -e "${BLUE}     Author: ${YELLOW}${AUTHOR_GITHUB}${NC}"
     echo -e "${BLUE}     快捷启动命令: ${RED}${SHORTCUT_CMD}${NC}"
     echo -e "${BLUE}==================================================${NC}"
@@ -1061,7 +1137,7 @@ show_mini_header() {
 show_menu() {
     clear 2>/dev/null || true
     echo -e "${BLUE}==================================================${NC}"
-    echo -e "${GREEN}             ${SCRIPT_NAME}                  ${NC}"
+    echo -e "${GREEN}             ${SCRIPT_NAME}${NC}"
     echo -e "${BLUE}     Author: ${YELLOW}${AUTHOR_GITHUB}${NC}"
     echo -e "${BLUE}     快捷启动命令: ${RED}${SHORTCUT_CMD}${NC}"
     echo -e "${BLUE}     当前版本: ${YELLOW}v${SCRIPT_VERSION}${NC}  累计调用: ${YELLOW}${USAGE_COUNT:-暂不可用}${NC}"
