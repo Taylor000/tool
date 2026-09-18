@@ -163,6 +163,14 @@ install_base() {
         
         if [[ ${#missing[@]} -gt 0 ]]; then
             echo "安装缺失的包: ${missing[*]}"
+            if [[ x"${release}" == x"debian" && ${os_version:-} == "11" ]]; then
+                if install_bullseye_dependencies_from_snapshot "${missing[@]}"; then
+                    return 0
+                fi
+                echo -e "${red}Debian 11 官方快照依赖安装失败: ${missing[*]}${plain}" >&2
+                return 1
+            fi
+
             apt_options=(-o Acquire::Retries=3)
             if apt-get "${apt_options[@]}" update &&
                DEBIAN_FRONTEND=noninteractive apt-get "${apt_options[@]}" install -y "${missing[@]}"; then
@@ -197,10 +205,6 @@ install_base() {
             fi
 
             if ! DEBIAN_FRONTEND=noninteractive apt-get "${retry_options[@]}" install -y "${missing[@]}"; then
-                if [[ x"${release}" == x"debian" && ${os_version:-} == "11" ]] &&
-                   install_bullseye_dependencies_from_snapshot "${missing[@]}"; then
-                    return 0
-                fi
                 echo -e "${red}重建软件包索引后依赖安装仍然失败: ${missing[*]}${plain}" >&2
                 return 1
             fi
