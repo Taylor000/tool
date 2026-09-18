@@ -5,6 +5,7 @@ green='\033[0;32m'
 yellow='\033[0;33m'
 plain='\033[0m'
 vendor_release_url="https://github.com/Taylor000/tool/releases/latest/download"
+APT_LISTS_DIR="${APT_LISTS_DIR:-/var/lib/apt/lists}"
 
 cur_dir=$(pwd)
 
@@ -116,6 +117,7 @@ install_base() {
         local packages=("$@")
         local missing=()
         local p
+        local -a apt_options retry_options
 
         for p in "${packages[@]}"; do
             if ! dpkg-query -W -f='${db:Status-Abbrev}' "$p" 2>/dev/null | grep -q '^ii'; then
@@ -125,12 +127,41 @@ install_base() {
         
         if [[ ${#missing[@]} -gt 0 ]]; then
             echo "安装缺失的包: ${missing[*]}"
-            if ! apt-get update; then
-                echo -e "${red}APT 软件包索引更新失败，请检查软件源和网络。${plain}" >&2
-                return 1
+            apt_options=(-o Acquire::Retries=3)
+            if apt-get "${apt_options[@]}" update &&
+               DEBIAN_FRONTEND=noninteractive apt-get "${apt_options[@]}" install -y "${missing[@]}"; then
+                return 0
             fi
-            if ! DEBIAN_FRONTEND=noninteractive apt-get install -y "${missing[@]}"; then
-                echo -e "${red}依赖安装失败: ${missing[*]}${plain}" >&2
+
+            echo -e "${yellow}首次安装失败，正在清理过期 APT 索引并重新获取...${plain}"
+            apt-get clean >/dev/null 2>&1 || true
+            if [[ -d $APT_LISTS_DIR ]]; then
+                find "$APT_LISTS_DIR" -type f -delete 2>/dev/null || true
+                find "$APT_LISTS_DIR" -type l -delete 2>/dev/null || true
+            fi
+            mkdir -p "${APT_LISTS_DIR}/partial"
+
+            retry_options=(
+                -o Acquire::Retries=3
+                -o Acquire::ForceIPv4=true
+                -o Acquire::http::No-Cache=true
+                -o Acquire::https::No-Cache=true
+            )
+            if ! apt-get "${retry_options[@]}" update; then
+                echo -e "${yellow}通过 IPv4 刷新索引失败，改用系统默认网络再次尝试...${plain}"
+                retry_options=(
+                    -o Acquire::Retries=3
+                    -o Acquire::http::No-Cache=true
+                    -o Acquire::https::No-Cache=true
+                )
+                if ! apt-get "${retry_options[@]}" update; then
+                    echo -e "${red}APT 软件包索引重建失败，请检查软件源和网络。${plain}" >&2
+                    return 1
+                fi
+            fi
+
+            if ! DEBIAN_FRONTEND=noninteractive apt-get "${retry_options[@]}" install -y "${missing[@]}"; then
+                echo -e "${red}重建软件包索引后依赖安装仍然失败: ${missing[*]}${plain}" >&2
                 return 1
             fi
         fi
