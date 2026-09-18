@@ -6,6 +6,7 @@ yellow='\033[0;33m'
 plain='\033[0m'
 vendor_release_url="https://github.com/Taylor000/tool/releases/latest/download"
 APT_LISTS_DIR="${APT_LISTS_DIR:-/var/lib/apt/lists}"
+BULLSEYE_SECURITY_SNAPSHOT="20260831T211304Z"
 
 cur_dir=$(pwd)
 
@@ -111,6 +112,41 @@ elif [[ x"${release}" == x"debian" ]]; then
     fi
 fi
 
+install_bullseye_dependencies_from_snapshot() {
+    local snapshot_dir sources_file status=1
+    local -a packages=("$@") snapshot_options
+
+    snapshot_dir=$(mktemp -d /tmp/v2node-bullseye-apt.XXXXXX) || return 1
+    sources_file="${snapshot_dir}/sources.list"
+    mkdir -p "${snapshot_dir}/lists/partial" "${snapshot_dir}/archives/partial"
+    cat > "$sources_file" <<EOF
+deb http://deb.debian.org/debian bullseye main
+deb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/${BULLSEYE_SECURITY_SNAPSHOT}/ bullseye-security main
+EOF
+
+    snapshot_options=(
+        -o "Dir::Etc::sourcelist=${sources_file}"
+        -o Dir::Etc::sourceparts=-
+        -o "Dir::State::lists=${snapshot_dir}/lists"
+        -o "Dir::Cache::archives=${snapshot_dir}/archives"
+        -o Acquire::Check-Valid-Until=false
+        -o Acquire::ForceIPv4=true
+        -o Acquire::Retries=3
+    )
+
+    echo -e "${yellow}Debian 11 已于 2026-08-31 结束 LTS，普通安全仓库正在迁移。${plain}"
+    echo -e "${yellow}本次仅临时使用 Debian 官方最后一个 Bullseye 安全快照安装依赖，不会修改系统软件源。${plain}"
+    if apt-get "${snapshot_options[@]}" update &&
+       DEBIAN_FRONTEND=noninteractive apt-get "${snapshot_options[@]}" install -y "${packages[@]}"; then
+        status=0
+    else
+        echo -e "${red}通过 Debian 官方 Bullseye 安全快照安装依赖失败。${plain}" >&2
+    fi
+
+    rm -rf "$snapshot_dir"
+    return "$status"
+}
+
 install_base() {
     # 优化版本：批量检查和安装包，减少系统调用
     need_install_apt() {
@@ -161,6 +197,10 @@ install_base() {
             fi
 
             if ! DEBIAN_FRONTEND=noninteractive apt-get "${retry_options[@]}" install -y "${missing[@]}"; then
+                if [[ x"${release}" == x"debian" && ${os_version:-} == "11" ]] &&
+                   install_bullseye_dependencies_from_snapshot "${missing[@]}"; then
+                    return 0
+                fi
                 echo -e "${red}重建软件包索引后依赖安装仍然失败: ${missing[*]}${plain}" >&2
                 return 1
             fi
