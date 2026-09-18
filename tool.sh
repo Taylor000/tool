@@ -19,8 +19,8 @@ NC='\033[0m'
 AUTHOR_GITHUB="https://github.com/Taylor000"
 SCRIPT_NAME="一个人的脚本百宝箱"
 SHORTCUT_CMD="tool"
-SCRIPT_VERSION="2.2.8"
-MIN_SUPPORTED_VERSION="2.2.8"
+SCRIPT_VERSION="2.2.9"
+MIN_SUPPORTED_VERSION="2.2.9"
 SCRIPT_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool/master/tool.sh"
 REPOSITORY_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool"
 VENDOR_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool/master/vendor"
@@ -37,6 +37,7 @@ DEFAULT_PASS="github.taylor000"
 BIND_IP="127.0.0.1"
 PUBLIC_BIND_IP="0.0.0.0"
 APT_INDEX_REFRESHED=0
+DEBIAN_11_SNAPSHOT="20260831T211304Z"
 ACTIVE_REPOSITORY_REVISION=""
 WIN10_LTSC_IMAGE_URL="https://dl.lamp.sh/vhd/zh-cn_windows10_ltsc.xz"
 WIN11_LTSC_IMAGE_URL="https://dl.lamp.sh/vhd/zh-cn_win11_ltsc.xz"
@@ -225,19 +226,71 @@ check_script_update() {
     exec "$CURRENT_SCRIPT"
 }
 
+is_debian_11() {
+    local distro_id="" distro_version=""
+
+    if [[ -r /etc/os-release ]]; then
+        distro_id=$(sed -nE 's/^ID="?([^" ]+)"?$/\1/p' /etc/os-release | head -n 1)
+        distro_version=$(sed -nE 's/^VERSION_ID="?([^" ]+)"?$/\1/p' /etc/os-release | head -n 1)
+    fi
+    [[ $distro_id == "debian" && $distro_version == "11" ]]
+}
+
+install_debian_11_packages() {
+    local temp_dir sources_file status=1
+    local -a apt_options packages=("$@")
+
+    temp_dir=$(mktemp -d /tmp/tool-bullseye-apt.XXXXXX) || return 1
+    sources_file="${temp_dir}/sources.list"
+    mkdir -p "${temp_dir}/lists/partial" "${temp_dir}/archives/partial"
+    cat > "$sources_file" <<EOF
+deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/${DEBIAN_11_SNAPSHOT}/ bullseye main
+deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/${DEBIAN_11_SNAPSHOT}/ bullseye-updates main
+deb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/${DEBIAN_11_SNAPSHOT}/ bullseye-security main
+EOF
+
+    apt_options=(
+        -o "Dir::Etc::sourcelist=${sources_file}"
+        -o Dir::Etc::sourceparts=-
+        -o "Dir::State::lists=${temp_dir}/lists"
+        -o "Dir::Cache::archives=${temp_dir}/archives"
+        -o Acquire::Check-Valid-Until=false
+        -o Acquire::ForceIPv4=true
+        -o Acquire::Retries=3
+        -o Acquire::http::No-Cache=true
+        -o Acquire::https::No-Cache=true
+    )
+
+    warn "Debian 11 使用固定软件仓库快照安装：${packages[*]}"
+    if apt-get "${apt_options[@]}" update &&
+       DEBIAN_FRONTEND=noninteractive apt-get "${apt_options[@]}" install -y "${packages[@]}"; then
+        status=0
+        APT_INDEX_REFRESHED=1
+    else
+        error "Debian 11 固定软件仓库安装失败。"
+    fi
+
+    rm -rf "$temp_dir"
+    return "$status"
+}
+
 install_packages() {
     (( $# > 0 )) || return 0
 
     if command_exists apt-get; then
+        if is_debian_11; then
+            install_debian_11_packages "$@"
+            return $?
+        fi
         if (( APT_INDEX_REFRESHED == 0 )); then
             warn "正在刷新 APT 软件包索引..."
-            if DEBIAN_FRONTEND=noninteractive apt-get update; then
+            if DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=3 update; then
                 APT_INDEX_REFRESHED=1
             else
                 warn "APT 软件包索引刷新未完全成功，将尝试使用现有索引继续安装。"
             fi
         fi
-        DEBIAN_FRONTEND=noninteractive apt-get install -y "$@"
+        DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=3 install -y "$@"
     elif command_exists dnf; then
         dnf install -y "$@"
     elif command_exists yum; then
