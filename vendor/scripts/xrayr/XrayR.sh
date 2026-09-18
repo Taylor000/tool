@@ -7,6 +7,7 @@ plain='\033[0m'
 
 version="v1.0.0"
 tool_raw_url="https://raw.githubusercontent.com/Taylor000/tool/master/vendor/scripts"
+xrayr_raw_url="https://raw.githubusercontent.com/Taylor000/XrayR/master"
 install_source_file="/etc/XrayR/install-source"
 
 get_install_source() {
@@ -20,7 +21,7 @@ get_install_source() {
 
 get_installer_url() {
     if [[ $(get_install_source) == "frozen" ]]; then
-        echo "${tool_raw_url}/xrayr-official-install.sh"
+        echo "${xrayr_raw_url}/install.sh"
     else
         echo "${tool_raw_url}/youzi3-xrayr-install.sh"
     fi
@@ -320,7 +321,11 @@ install_bbr() {
 }
 
 update_shell() {
-    wget -O /usr/bin/XrayR -N --no-check-certificate https://raw.githubusercontent.com/Taylor000/tool/master/vendor/scripts/xrayr/XrayR.sh
+    local manager_url="https://raw.githubusercontent.com/Taylor000/tool/master/vendor/scripts/xrayr/XrayR.sh"
+    if [[ $(get_install_source) == "frozen" ]]; then
+        manager_url="${xrayr_raw_url}/scripts/xrayr.sh"
+    fi
+    wget -O /usr/bin/XrayR -N --no-check-certificate "$manager_url"
     if [[ $? != 0 ]]; then
         echo ""
         echo -e "${red}下载脚本失败，请检查本机能否连接 Github${plain}"

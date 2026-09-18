@@ -19,13 +19,17 @@ NC='\033[0m'
 AUTHOR_GITHUB="https://github.com/Taylor000"
 SCRIPT_NAME="一个人的脚本百宝箱"
 SHORTCUT_CMD="tool"
-SCRIPT_VERSION="2.2.7"
-MIN_SUPPORTED_VERSION="2.2.7"
+SCRIPT_VERSION="2.2.8"
+MIN_SUPPORTED_VERSION="2.2.8"
 SCRIPT_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool/master/tool.sh"
 REPOSITORY_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool"
 VENDOR_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool/master/vendor"
 USAGE_COUNTER_URL="https://hits.sh/github.com/Taylor000/tool.svg?label=uses&color=blue"
 REPOSITORY_COMMIT_API_URL="https://api.github.com/repos/Taylor000/tool/commits/master"
+KOMARI_INSTALL_URL="https://raw.githubusercontent.com/Taylor000/komari/main/install-komari.sh"
+KOMARI_AGENT_INSTALL_URL="https://raw.githubusercontent.com/Taylor000/komari-agent/main/install.sh"
+XRAYR_INSTALL_URL="https://raw.githubusercontent.com/Taylor000/XrayR/master/install.sh"
+V2NODE_INSTALL_URL="https://raw.githubusercontent.com/Taylor000/v2node/main/script/install.sh"
 
 # 默认全局配置
 DEFAULT_PORT="11156"
@@ -988,10 +992,10 @@ show_menu() {
     echo -e "${YELLOW} 12.${NC} 安装 aaPanel 面板 (mzwrt 备份版)"
     echo -e "${YELLOW} 13.${NC} 安装 Docker 运行环境"
     echo -e "${YELLOW} 14.${NC} 安装 ServerStatus 监控探针"
-    echo -e "${YELLOW} 15.${NC} 安装 Komari 监控探针 (Docker版)"
-    echo -e "${YELLOW} 16.${NC} 安装 XrayR 自用冻结版 (v0.9.4)"
-    echo -e "${YELLOW} 17.${NC} 安装 XrayR 后端对接 (柚子备份版，需配置)"
-    echo -e "${YELLOW} 18.${NC} 安装 v2node 后端对接 (Taylor000 自用备份版)"
+    echo -e "${YELLOW} 15.${NC} 安装 Komari 1.2.0"
+    echo -e "${YELLOW} 16.${NC} 安装 Komari Agent (默认 1.1.93)"
+    echo -e "${YELLOW} 17.${NC} 安装 XrayR v0.9.4"
+    echo -e "${YELLOW} 18.${NC} 安装 v2node v1.0.0"
     echo -e "${BLUE}--------------------------------------------------${NC}"
     echo -e "${YELLOW} 19.${NC} ${RED}卸载并删除本脚本${NC}"
     echo -e "${RED} 0.${NC} 退出脚本 (或双击回车)${NC}"
@@ -1227,96 +1231,82 @@ while true; do
             pause_menu
             ;;
         15)
-            check_docker || { pause_menu; continue; }
-            read -r -p "设置安装目录 (默认 $HOME/komari): " k_dir
-            k_dir=${k_dir:-"$HOME/komari"}
-            read -r -p "设置容器访问端口 (默认 25774): " k_port
+            read -r -p "监听端口 (默认 25774): " k_port
             k_port=${k_port:-25774}
-            read -r -p "设置 Docker 容器名称 (默认 komari): " k_name
-            k_name=${k_name:-komari}
-
-            if ! valid_port "$k_port" || ! valid_container_name "$k_name"; then
-                error "端口或容器名称格式无效。"
+            if ! valid_port "$k_port"; then
+                error "端口必须是 1-65535 之间的整数。"
                 pause_menu
                 continue
             fi
-            if docker ps -a --format '{{.Names}}' | grep -Fxq "$k_name"; then
-                read -r -p "检测到名为 ${k_name} 的容器已存在，是否删除重装？(y/n): " re_k
-                [[ $re_k != [yY] ]] && continue
-                docker rm -f "$k_name" >/dev/null || {
-                    error "旧容器删除失败。"
-                    pause_menu
-                    continue
-                }
+            if [[ -x /opt/komari/komari ]]; then
+                read -r -p "检测到 Komari，是否重新安装？(y/n, 默认n): " re_k
+                [[ $re_k == [yY] ]] || continue
             fi
-
-            mkdir -p "$k_dir/data"
-            if docker run -d \
-              -p "${BIND_IP}:${k_port}:25774" \
-              -v "$k_dir/data:/app/data" \
-              --name "$k_name" \
-              --restart unless-stopped \
-              ghcr.io/komari-monitor/komari:latest >/dev/null &&
-              wait_for_container "$k_name"; then
-                info "Komari 安装完成！"
-                if [[ $BIND_IP == "127.0.0.1" ]]; then
-                    echo -e "反向代理目标: ${BLUE}http://127.0.0.1:${k_port}${NC}"
-                else
-                    get_network_info || LOCAL_IP="服务器公网IP"
-                    echo -e "访问地址: ${BLUE}http://${LOCAL_IP}:${k_port}${NC}"
-                fi
-                warn "初始管理员账号和密码如下："
-                docker logs --tail 30 "$k_name" 2>&1
+            if run_remote_script "$KOMARI_INSTALL_URL" --port "$k_port"; then
+                info "Komari 1.2.0 安装完成。"
+                echo -e "访问地址: ${BLUE}http://服务器IP:${k_port}${NC}"
+                echo -e "管理命令: ${BLUE}systemctl status komari${NC}"
             else
-                error "Komari 容器创建或启动失败。"
-                docker logs --tail 30 "$k_name" 2>/dev/null || true
+                error "Komari 安装失败。"
             fi
             pause_menu
             ;;
         16)
-            check_installed "xrayr" "XrayR 自用冻结版" "xrayr" || { pause_menu; continue; }
-            info "安装来源: Taylor000/XrayR 自用仓库（固定 v0.9.4）"
-            warn "该版本不会再获得安全更新，请仅在兼容旧节点时使用。"
-            read -r -p "是否继续安装？(y/n, 默认n): " xrayr_official_confirm
-            if [[ $xrayr_official_confirm != [yY] ]]; then
+            if [[ -x /opt/komari/agent ]]; then
+                read -r -p "检测到 Komari Agent，是否重新安装？(y/n, 默认n): " re_agent
+                [[ $re_agent == [yY] ]] || continue
+            fi
+            read -r -p "Agent 版本 (默认 1.1.93，可选 1.2.0): " agent_version
+            agent_version=${agent_version:-1.1.93}
+            case "$agent_version" in
+                1.1.93|1.93) agent_version="1.1.93" ;;
+                1.2.0|1.20) agent_version="1.2.0" ;;
+                *)
+                    error "仅支持 1.1.93 和 1.2.0。"
+                    pause_menu
+                    continue
+                    ;;
+            esac
+            read -r -p "面板地址: " agent_endpoint
+            read -r -s -p "Agent Token: " agent_token
+            echo
+            if [[ -z "$agent_endpoint" || -z "$agent_token" ]]; then
+                error "面板地址和 Token 不能为空。"
+                unset agent_token
+                pause_menu
                 continue
             fi
-            if run_remote_script "${VENDOR_RAW_URL}/scripts/xrayr-official-install.sh"; then
+            if run_remote_script "$KOMARI_AGENT_INSTALL_URL" \
+                --install-version "$agent_version" \
+                -e "$agent_endpoint" -t "$agent_token" \
+                --disable-web-ssh --disable-auto-update --ignore-unsafe-cert; then
+                info "Komari Agent ${agent_version} 安装完成。"
+                echo -e "管理命令: ${BLUE}systemctl status komari-agent${NC}"
+            else
+                error "Komari Agent 安装失败。"
+            fi
+            unset agent_token
+            pause_menu
+            ;;
+        17)
+            check_installed "xrayr" "XrayR v0.9.4" "xrayr" || { pause_menu; continue; }
+            if run_remote_script "$XRAYR_INSTALL_URL"; then
                 if command_exists xrayr && [[ -f /etc/systemd/system/XrayR.service ]]; then
-                    info "XrayR 自用冻结版 v0.9.4 安装完成。管理命令: xrayr"
-                    warn "请编辑 /etc/XrayR/config.yml 填写面板参数，然后执行: xrayr restart"
+                    info "XrayR v0.9.4 安装完成。管理命令: xrayr"
                 else
                     error "安装脚本已结束，但未检测到 XrayR 管理命令或服务文件。"
                 fi
             else
-                error "XrayR 自用冻结版安装脚本下载或执行失败。"
-            fi
-            show_mini_header
-            ;;
-        17)
-            check_installed "xrayr" "XrayR 柚子" "xrayr" || { pause_menu; continue; }
-            if run_remote_script "${VENDOR_RAW_URL}/scripts/youzi3-xrayr-install.sh"; then
-                if command_exists xrayr || command_exists XrayR; then
-                    info "XrayR 柚子版安装完成。管理命令: xrayr"
-                    if [[ -f /etc/XrayR/config.yml ]]; then
-                        warn "请先编辑 /etc/XrayR/config.yml 填写面板地址、节点 ID 和通讯密钥，然后执行: xrayr restart"
-                    else
-                        warn "未检测到 /etc/XrayR/config.yml，请执行 xrayr install 或重新运行本菜单。"
-                    fi
-                else
-                    error "安装脚本已结束，但未检测到 XrayR 管理命令。"
-                fi
-            else
-                error "XrayR 柚子版安装脚本下载或执行失败。"
+                error "XrayR 安装失败。"
             fi
             show_mini_header
             ;;
         18)
-            check_installed "v2node" "v2node" "v2node" || { pause_menu; continue; }
-            info "安装来源: Taylor000/tool 自有 Release（固定归档资源）"
+            check_installed "v2node" "v2node v1.0.0" "v2node" || { pause_menu; continue; }
             read -r -p "面板 API 地址 (例如 https://example.com/，留空则只安装程序): " v2_api_host
             read -r -p "节点 ID (留空则只安装程序): " v2_node_id
-            read -r -p "节点通讯密钥 (留空则只安装程序): " v2_api_key
+            read -r -s -p "节点通讯密钥 (留空则只安装程序): " v2_api_key
+            echo
 
             v2_args=()
             if [[ -n "$v2_api_host" || -n "$v2_node_id" || -n "$v2_api_key" ]]; then
@@ -1328,9 +1318,9 @@ while true; do
                 v2_args=(--api-host "$v2_api_host" --node-id "$v2_node_id" --api-key "$v2_api_key")
             fi
 
-            if run_remote_script "${VENDOR_RAW_URL}/scripts/wyx2685-v2node-install.sh" "${v2_args[@]}"; then
+            if run_remote_script "$V2NODE_INSTALL_URL" "${v2_args[@]}"; then
                 if command_exists v2node; then
-                    info "v2node 安装完成。管理命令: v2node"
+                    info "v2node v1.0.0 安装完成。管理命令: v2node"
                     if [[ ! -f /etc/v2node/config.json ]]; then
                         warn "v2node 已安装，但尚未生成 /etc/v2node/config.json；请执行 v2node generate 或重新运行本菜单填写面板参数。"
                     elif command_exists systemctl && systemctl is-active --quiet v2node; then
@@ -1342,8 +1332,9 @@ while true; do
                     error "安装脚本已结束，但未检测到 v2node 管理命令。"
                 fi
             else
-                error "v2node 安装脚本下载或执行失败。"
+                error "v2node 安装失败。"
             fi
+            unset v2_api_key
             show_mini_header
             ;;
         19)

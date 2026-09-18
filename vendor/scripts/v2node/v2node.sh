@@ -6,7 +6,7 @@ yellow='\033[0;33m'
 plain='\033[0m'
 
 cur_dir=$(pwd)
-installer_url="https://raw.githubusercontent.com/Taylor000/tool/master/vendor/scripts/wyx2685-v2node-install.sh"
+installer_url="https://raw.githubusercontent.com/Taylor000/v2node/main/script/install.sh"
 
 # check root
 [[ $EUID -ne 0 ]] && echo -e "${red}错误：${plain} 必须使用root用户运行此脚本！\n" && exit 1
@@ -142,7 +142,7 @@ install() {
 
 update() {
     if run_installer; then
-        echo -e "${green}已重新安装 Taylor000 自用固定版本并自动重启，请使用 v2node log 查看运行日志${plain}"
+        echo -e "${green}已重新安装 v2node v1.0.0 并自动重启，请使用 v2node log 查看运行日志${plain}"
         exit
     fi
 
@@ -324,7 +324,7 @@ show_log() {
 }
 
 update_shell() {
-    wget -O /usr/bin/v2node -N --no-check-certificate https://raw.githubusercontent.com/Taylor000/tool/master/vendor/scripts/v2node/v2node.sh
+    wget -O /usr/bin/v2node -N --no-check-certificate https://raw.githubusercontent.com/Taylor000/v2node/main/script/v2node.sh
     if [[ $? != 0 ]]; then
         echo ""
         echo -e "${red}下载脚本失败，请检查本机能否连接 Github${plain}"
@@ -519,7 +519,7 @@ show_usage() {
     echo "v2node log          - 查看 v2node 日志"
     echo "v2node x25519       - 生成 x25519 密钥"
     echo "v2node generate     - 生成 v2node 配置文件"
-    echo "v2node update       - 重新安装 Taylor000 自用固定版本"
+    echo "v2node update       - 重新安装 v1.0.0"
     echo "v2node install      - 安装 v2node"
     echo "v2node uninstall    - 卸载 v2node"
     echo "v2node version      - 查看 v2node 版本"
@@ -529,7 +529,7 @@ show_usage() {
 show_menu() {
     echo -e "
   ${green}v2node 后端管理脚本，${plain}${red}不适用于docker${plain}
---- Taylor000 自用备份版（资源来自 Taylor000/tool）---
+--- https://github.com/Taylor000/v2node (v1.0.0) ---
   ${green}0.${plain} 修改配置
 ————————————————
   ${green}1.${plain} 安装 v2node

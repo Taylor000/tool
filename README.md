@@ -1,17 +1,6 @@
-<div align="center">
-  <img src="./assets/header.svg" width="100%" alt="一个人的脚本百宝箱 — Linux VPS Toolbox" />
-</div>
+# tool v2.2.8
 
-<p align="center">
-  <img src="https://img.shields.io/badge/version-v2.2.7-FDEBF3?style=flat-square&labelColor=FFF9F3" alt="Version 2.2.7" />
-  <img src="https://img.shields.io/badge/Shell-EAF7F1?style=flat-square&logo=gnu-bash&logoColor=4F6F65" alt="Shell" />
-  <img src="https://img.shields.io/badge/Linux-FFF2CF?style=flat-square&logo=linux&logoColor=75664A" alt="Linux" />
-  <img src="https://img.shields.io/badge/IPv4-EAF2FF?style=flat-square&logo=icloud&logoColor=536684" alt="IPv4" />
-</p>
-
-## 使用
-
-使用 `root` 用户执行：
+## 安装
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Taylor000/tool/master/tool.sh -o /usr/local/bin/tool
@@ -19,36 +8,27 @@ chmod +x /usr/local/bin/tool
 tool
 ```
 
-
 ## 菜单
 
 ```text
-==================================================
-             一个人的脚本百宝箱
-     Author: https://github.com/Taylor000
-     快捷启动命令: tool
-     当前版本: v2.2.7  累计调用: 暂不可用
-==================================================
- 1. 显示系统基本信息与性能测试
- 2. 修改系统 root 密码
- 3. 修改 SSH 服务端口
- 4. 安装 BBR 加速插件
- 5. 安装 iperf3 网络测速工具
- 6. 公网 IPv4 与默认出口管理
- 7. 安装 Debian 11 系统 (萌咖版)
- 8. 安装 Debian 12 系统 (萌咖版)
- 9. 安装 Win10 LTSC 系统 (秋水逸冰)
- 10. 安装旧版 Windows (veip007 交互版)
- 11. 安装 Windows 11 LTSC 系统
- 12. 安装 aaPanel 面板 (mzwrt 备份版)
- 13. 安装 Docker 运行环境
- 14. 安装 ServerStatus 监控探针
- 15. 安装 Komari 监控探针 (Docker版)
- 16. 安装 XrayR 自用冻结版 (v0.9.4)
- 17. 安装 XrayR 后端对接 (柚子备份版，需配置)
- 18. 安装 v2node 后端对接 (Taylor000 自用备份版)
---------------------------------------------------
- 19. 卸载并删除本脚本
- 0. 退出脚本 (或双击回车)
-==================================================
+1. 系统信息与性能测试
+2. 修改 root 密码
+3. 修改 SSH 端口
+4. BBR
+5. iperf3
+6. IPv4 与默认出口
+7. Debian 11
+8. Debian 12
+9. Windows 10 LTSC
+10. 旧版 Windows
+11. Windows 11 LTSC
+12. aaPanel
+13. Docker
+14. ServerStatus
+15. Komari 1.2.0
+16. Komari Agent（默认 1.1.93）
+17. XrayR v0.9.4
+18. v2node v1.0.0
+19. 卸载 tool
+0. 退出
 ```
