@@ -501,7 +501,7 @@ EOF
     management_script=$(mktemp /tmp/v2node-manager.XXXXXX) || return 1
     if ! curl --fail --location --silent --show-error --retry 3 \
         --output "$management_script" \
-        https://raw.githubusercontent.com/Taylor000/tool/master/vendor/scripts/v2node/v2node.sh; then
+        "https://raw.githubusercontent.com/Taylor000/tool/master/vendor/scripts/v2node/v2node.sh?cache_bust=$(date +%s)-$$-${RANDOM}"; then
         echo -e "${red}v2node 管理脚本下载失败。${plain}" >&2
         rm -f "$management_script"
         return 1

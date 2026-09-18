@@ -19,8 +19,8 @@ NC='\033[0m'
 AUTHOR_GITHUB="https://github.com/Taylor000"
 SCRIPT_NAME="一个人的脚本百宝箱"
 SHORTCUT_CMD="tool"
-SCRIPT_VERSION="2.2.2"
-MIN_SUPPORTED_VERSION="2.2.2"
+SCRIPT_VERSION="2.2.3"
+MIN_SUPPORTED_VERSION="2.2.3"
 SCRIPT_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool/master/tool.sh"
 REPOSITORY_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool"
 VENDOR_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool/master/vendor"
@@ -33,6 +33,7 @@ DEFAULT_PASS="github.taylor000"
 BIND_IP="127.0.0.1"
 PUBLIC_BIND_IP="0.0.0.0"
 APT_INDEX_REFRESHED=0
+ACTIVE_REPOSITORY_REVISION=""
 WIN10_LTSC_IMAGE_URL="https://dl.lamp.sh/vhd/zh-cn_windows10_ltsc.xz"
 WIN11_LTSC_IMAGE_URL="https://dl.lamp.sh/vhd/zh-cn_win11_ltsc.xz"
 TOOL_STATE_DIR="/etc/taylor-tool"
@@ -147,6 +148,9 @@ check_script_update() {
     local version_update=0 revision_update=0
 
     remote_revision=$(fetch_repository_revision 2>/dev/null || true)
+    if [[ $remote_revision =~ ^[0-9a-f]{40}$ ]]; then
+        ACTIVE_REPOSITORY_REVISION="$remote_revision"
+    fi
     if [[ $remote_revision =~ ^[0-9a-f]{40}$ ]]; then
         remote_script_url="${REPOSITORY_RAW_URL}/${remote_revision}/tool.sh"
     else
@@ -291,10 +295,27 @@ download_script() {
     chmod 700 "$destination"
 }
 
+resolve_remote_script_url() {
+    local url=$1 suffix separator="?"
+
+    if [[ $url == "$VENDOR_RAW_URL/"* &&
+          $ACTIVE_REPOSITORY_REVISION =~ ^[0-9a-f]{40}$ ]]; then
+        suffix=${url#"$VENDOR_RAW_URL/"}
+        printf '%s/%s/vendor/%s\n' \
+            "$REPOSITORY_RAW_URL" "$ACTIVE_REPOSITORY_REVISION" "$suffix"
+        return 0
+    fi
+
+    [[ $url == *\?* ]] && separator="&"
+    printf '%s%stool_cache_bust=%s-%s-%s\n' \
+        "$url" "$separator" "$(date +%s)" "$$" "$RANDOM"
+}
+
 run_remote_script() {
     local url=$1
     shift
     local script_file
+    url=$(resolve_remote_script_url "$url") || return 1
     script_file=$(mktemp /tmp/tool-script.XXXXXX) || return 1
 
     if ! download_script "$url" "$script_file"; then
@@ -313,6 +334,7 @@ run_remote_script_with_input() {
     local url=$2
     shift 2
     local script_file
+    url=$(resolve_remote_script_url "$url") || return 1
     script_file=$(mktemp /tmp/tool-script.XXXXXX) || return 1
 
     if ! download_script "$url" "$script_file"; then

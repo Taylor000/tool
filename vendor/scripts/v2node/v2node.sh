@@ -108,11 +108,12 @@ before_show_menu() {
 }
 
 run_installer() {
-    local installer_file status
+    local installer_file installer_request_url status
 
     installer_file=$(mktemp /tmp/v2node-installer.XXXXXX) || return 1
+    installer_request_url="${installer_url}?cache_bust=$(date +%s)-$$-${RANDOM}"
     if ! curl --fail --location --silent --show-error --retry 3 \
-        --output "$installer_file" "$installer_url"; then
+        --output "$installer_file" "$installer_request_url"; then
         echo -e "${red}v2node 安装脚本下载失败。${plain}" >&2
         rm -f "$installer_file"
         return 1
