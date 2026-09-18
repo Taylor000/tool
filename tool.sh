@@ -19,8 +19,8 @@ NC='\033[0m'
 AUTHOR_GITHUB="https://github.com/Taylor000"
 SCRIPT_NAME="一个人的脚本百宝箱"
 SHORTCUT_CMD="tool"
-SCRIPT_VERSION="2.2.9"
-MIN_SUPPORTED_VERSION="2.2.9"
+SCRIPT_VERSION="2.2.10"
+MIN_SUPPORTED_VERSION="2.2.10"
 SCRIPT_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool/master/tool.sh"
 REPOSITORY_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool"
 VENDOR_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool/master/vendor"
@@ -39,6 +39,8 @@ PUBLIC_BIND_IP="0.0.0.0"
 APT_INDEX_REFRESHED=0
 DEBIAN_11_SNAPSHOT="20260831T211304Z"
 ACTIVE_REPOSITORY_REVISION=""
+LAST_UPDATE_CHECK_EPOCH=0
+UPDATE_CHECK_INTERVAL=30
 WIN10_LTSC_IMAGE_URL="https://dl.lamp.sh/vhd/zh-cn_windows10_ltsc.xz"
 WIN11_LTSC_IMAGE_URL="https://dl.lamp.sh/vhd/zh-cn_win11_ltsc.xz"
 TOOL_STATE_DIR="/etc/taylor-tool"
@@ -226,14 +228,47 @@ check_script_update() {
     exec "$CURRENT_SCRIPT"
 }
 
+check_script_update_if_due() {
+    local current_epoch
+
+    current_epoch=$(date +%s)
+    if (( LAST_UPDATE_CHECK_EPOCH > 0 &&
+          current_epoch - LAST_UPDATE_CHECK_EPOCH < UPDATE_CHECK_INTERVAL )); then
+        return 0
+    fi
+    LAST_UPDATE_CHECK_EPOCH=$current_epoch
+    check_script_update
+}
+
 is_debian_11() {
-    local distro_id="" distro_version=""
+    local distro_id="" distro_version="" distro_codename="" debian_version=""
 
     if [[ -r /etc/os-release ]]; then
         distro_id=$(sed -nE 's/^ID="?([^" ]+)"?$/\1/p' /etc/os-release | head -n 1)
         distro_version=$(sed -nE 's/^VERSION_ID="?([^" ]+)"?$/\1/p' /etc/os-release | head -n 1)
+        distro_codename=$(sed -nE 's/^VERSION_CODENAME="?([^" ]+)"?$/\1/p' /etc/os-release | head -n 1)
     fi
-    [[ $distro_id == "debian" && $distro_version == "11" ]]
+
+    if [[ $distro_id == "debian" && $distro_version == 11* ]] ||
+       [[ $distro_codename == "bullseye" ]]; then
+        return 0
+    fi
+
+    if [[ -r /etc/debian_version ]]; then
+        IFS= read -r debian_version < /etc/debian_version || true
+        if [[ $debian_version == 11 || $debian_version == 11.* ||
+              $debian_version == "bullseye/sid" ]]; then
+            return 0
+        fi
+    fi
+
+    # 兼容系统版本信息被服务商修改、但实际仍使用 Bullseye 软件源的镜像。
+    if grep -Eqs '^[[:space:]]*deb([[:space:]]+\[[^]]+\])?[[:space:]]+[^[:space:]#]+[[:space:]]+bullseye([[:space:]-]|$)' \
+        /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null; then
+        return 0
+    fi
+    grep -Eqs '^[[:space:]]*Suites:[[:space:]].*\bbullseye\b' \
+        /etc/apt/sources.list.d/*.sources 2>/dev/null
 }
 
 install_debian_11_packages() {
@@ -1064,7 +1099,7 @@ fi
 # 脚本运行初始化
 record_usage_count
 check_base_dependencies
-check_script_update
+check_script_update_if_due
 
 while true; do
     show_menu
@@ -1077,6 +1112,9 @@ while true; do
     else
         empty_count=0
     fi
+
+    # 菜单可能长时间保持打开，执行操作前再确认没有新版本。
+    check_script_update_if_due
 
     case $choice in
         1)
