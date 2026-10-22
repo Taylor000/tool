@@ -19,7 +19,7 @@ NC='\033[0m'
 AUTHOR_GITHUB="https://github.com/Taylor000"
 SCRIPT_NAME="一个人的脚本百宝箱"
 SHORTCUT_CMD="tool"
-SCRIPT_VERSION="2.2.11"
+SCRIPT_VERSION="2.2.12"
 MIN_SUPPORTED_VERSION="2.2.11"
 SCRIPT_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool/master/tool.sh"
 REPOSITORY_RAW_URL="https://raw.githubusercontent.com/Taylor000/tool"
@@ -150,6 +150,7 @@ save_repository_revision() {
 }
 
 check_script_update() {
+    local manual=${1:-0}
     local remote_script remote_script_url remote_version remote_min_version
     local remote_revision="" saved_revision="" update_reason=""
     local version_update=0 revision_update=0
@@ -167,7 +168,11 @@ check_script_update() {
     remote_script=$(mktemp /tmp/tool-update.XXXXXX) || return 0
     if ! download_script "$remote_script_url" "$remote_script"; then
         rm -f "$remote_script"
-        warn "暂时无法检查脚本更新，将继续运行当前版本。"
+        if (( manual == 1 )); then
+            error "无法下载远端脚本，请检查网络后重试。"
+        else
+            warn "暂时无法检查脚本更新，将继续运行当前版本。"
+        fi
         return 0
     fi
 
@@ -192,17 +197,26 @@ check_script_update() {
     fi
 
     if (( version_update == 0 && revision_update == 0 )); then
-        rm -f "$remote_script"
-        if [[ $remote_revision =~ ^[0-9a-f]{40}$ &&
-              ! $saved_revision =~ ^[0-9a-f]{40}$ ]]; then
-            save_repository_revision "$remote_revision" ||
-                warn "无法保存脚本修订号；下次仍会重新检查更新。"
+        local reinstall_confirm=""
+        if (( manual == 1 )); then
+            info "当前已是最新版本 v${SCRIPT_VERSION}。"
+            read -r -p "是否仍要重新下载并覆盖本脚本？(y/n, 默认n): " reinstall_confirm
         fi
-        return 0
+        if [[ $reinstall_confirm != [yY] ]]; then
+            rm -f "$remote_script"
+            if [[ $remote_revision =~ ^[0-9a-f]{40}$ &&
+                  ! $saved_revision =~ ^[0-9a-f]{40}$ ]]; then
+                save_repository_revision "$remote_revision" ||
+                    warn "无法保存脚本修订号；下次仍会重新检查更新。"
+            fi
+            return 0
+        fi
     fi
 
     if (( version_update == 1 )); then
         update_reason="版本 ${SCRIPT_VERSION} → ${remote_version}"
+    elif (( revision_update == 0 )); then
+        update_reason="手动重新安装请求 (v${remote_version})"
     else
         update_reason="仓库脚本已更新 (${saved_revision:0:7} → ${remote_revision:0:7})"
     fi
@@ -1161,7 +1175,8 @@ show_menu() {
     echo -e "${YELLOW} 17.${NC} 安装 XrayR v0.9.4"
     echo -e "${YELLOW} 18.${NC} 安装 v2node v1.0.0"
     echo -e "${BLUE}--------------------------------------------------${NC}"
-    echo -e "${YELLOW} 19.${NC} ${RED}卸载并删除本脚本${NC}"
+    echo -e "${YELLOW} 19.${NC} 手动更新本脚本"
+    echo -e "${YELLOW} 20.${NC} ${RED}卸载并删除本脚本${NC}"
     echo -e "${RED} 0.${NC} 退出脚本 (或双击回车)${NC}"
     echo -e "${BLUE}==================================================${NC}"
 }
@@ -1505,6 +1520,12 @@ while true; do
             show_mini_header
             ;;
         19)
+            info "正在检查脚本更新..."
+            LAST_UPDATE_CHECK_EPOCH=$(date +%s)
+            check_script_update 1
+            pause_menu
+            ;;
+        20)
             read -r -p "确定要删除本脚本及快捷命令吗？(y/n): " del_confirm
             if [[ $del_confirm == [yY] ]]; then
                 remove_preferred_ipv4_persistence 1
